@@ -1,0 +1,195 @@
+.ar-shell {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(340px, 0.6fr);
+  background: #111311;
+}
+.camera-stage {
+  position: relative;
+  min-height: 62svh;
+  overflow: hidden;
+  background: radial-gradient(circle at 45% 38%, #3f5041, #151b16 60%, #090a09);
+}
+.camera-feed,
+.debug-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.camera-feed.is-mirrored {
+  transform: scaleX(-1);
+}
+.debug-grid {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.debug-grid.is-visible {
+  opacity: 1;
+}
+.camera-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.36),
+    transparent 24%,
+    transparent 72%,
+    rgba(0, 0, 0, 0.5)
+  );
+}
+.camera-chrome {
+  position: absolute;
+  z-index: 1;
+  top: 22px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid rgba(244, 240, 228, 0.25);
+  background: rgba(7, 9, 7, 0.48);
+  color: #f7f3e9;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #85887e;
+}
+.status-dot.previewing {
+  background: #e1ff48;
+  box-shadow: 0 0 11px #e1ff48;
+}
+.status-dot.error {
+  background: #ff7262;
+}
+.stage-message {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
+  max-width: 300px;
+  transform: translate(-50%, -50%);
+  color: #e9e6dc;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(30px, 6vw, 92px);
+  border-left: 1px solid #30352e;
+  background: #181b18;
+}
+.eyebrow {
+  margin: 0 0 18px;
+  color: #e1ff48;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.control-panel h1 {
+  max-width: 380px;
+  margin: 0;
+  color: #fffdf4;
+  font-family: Fraunces, Georgia, serif;
+  font-size: clamp(42px, 5vw, 72px);
+  font-weight: 600;
+  line-height: 0.94;
+  letter-spacing: -0.055em;
+}
+.lede {
+  max-width: 410px;
+  margin: 26px 0 32px;
+  color: #abb0a5;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.controls {
+  display: grid;
+  gap: 10px;
+}
+.controls button,
+.retry {
+  min-height: 48px;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    background 0.15s;
+}
+.controls button:hover,
+.retry:hover {
+  transform: translateY(-2px);
+}
+.primary {
+  background: #e1ff48;
+  color: #151710;
+}
+.primary:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.secondary,
+.retry {
+  color: #e9e8df;
+  border-color: #4b5147 !important;
+  background: transparent;
+}
+.retry {
+  margin-top: 10px;
+}
+.diagnostics {
+  margin-top: 36px;
+  padding: 15px;
+  border: 1px solid #3d443b;
+  background: #101210;
+  color: #b9c0b3;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.diagnostics summary {
+  color: #e1ff48;
+  cursor: pointer;
+}
+.diagnostics ul {
+  padding-left: 18px;
+}
+.diagnostics b {
+  color: #f5f3e9;
+}
+.constraints {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 780px) {
+  .ar-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 57svh auto;
+  }
+  .camera-stage {
+    min-height: 0;
+  }
+  .control-panel {
+    padding: 30px 24px 38px;
+    border-left: 0;
+    border-top: 1px solid #30352e;
+  }
+  .control-panel h1 {
+    font-size: 49px;
+  }
+  .lede {
+    margin: 18px 0 24px;
+  }
+}

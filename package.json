@@ -11,7 +11,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "browsers": "browserslist",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "~1.0.1",
@@ -30,6 +31,7 @@
     "oxlint": "~1.79.0",
     "prettier": "~3.9.6",
     "typescript": "~6.0.2",
-    "vite": "~8.2.2"
+    "vite": "~8.2.2",
+    "vitest": "~4.0.18"
   }
 }
