@@ -3,6 +3,7 @@ import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
 import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
+import { WorkerPoseTracker } from '../ar-engine/tracking/WorkerPoseTracker';
 import type { PoseTracker } from '../ar-engine/contracts';
 import { TrackingMetrics } from '../ar-engine/diagnostics/TrackingMetrics';
 import { getCapabilityReport, type SessionState } from './session-state';
@@ -84,10 +85,11 @@ export function ARSessionPage() {
     const video = videoRef.current;
     const canvas = poseCanvasRef.current;
     if (session !== 'previewing' || !video || !canvas) return;
-    // The MediaPipe Emscripten loader cannot currently expose its ModuleFactory
-    // through Vite's module-worker boundary. Keep this stable compatibility
-    // adapter active until the dedicated Worker asset loader is integrated.
-    const tracker = trackerRef.current ?? new MainThreadPoseTracker();
+    const tracker =
+      trackerRef.current ??
+      (typeof Worker !== 'undefined'
+        ? new WorkerPoseTracker()
+        : new MainThreadPoseTracker());
     trackerRef.current = tracker;
     const renderer = new PoseDebugRenderer(canvas);
     let stopFrames: () => void = () => {};
@@ -105,13 +107,15 @@ export function ARSessionPage() {
       })
       .then(() => {
         if (cancelled) return;
-        setTrackerMessage('Pose tracker active (main-thread fallback)');
+        setTrackerMessage(
+          `Pose tracker active (${tracker instanceof WorkerPoseTracker ? 'worker' : 'main-thread fallback'})`,
+        );
         unsubscribe = tracker.subscribe((frame) => {
           const metrics = metricsRef.current.recordResult(frame);
           if (frame.timestampMs - lastMetricsUiRef.current >= 1000) {
             lastMetricsUiRef.current = frame.timestampMs;
             setTrackerMessage(
-              `Pose tracker active (fallback) · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms`,
+              `Pose tracker active · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms`,
             );
           }
           const rect = video.getBoundingClientRect();

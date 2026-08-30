@@ -11,6 +11,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     if (request.type === 'initialize') {
       const fileset = await FilesetResolver.forVisionTasks(
         request.config.wasmRoot,
+        true,
       );
       detector = await PoseLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: request.config.modelAssetPath },
