@@ -41,43 +41,53 @@ export function ARSessionPage() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  const startCamera = useCallback(async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setMessage(
-        'This browser does not provide camera access. Try a current mobile browser over HTTPS.',
-      );
-      setSession('error');
-      return;
-    }
+  const startCamera = useCallback(
+    async (requestedFacingMode = facingMode) => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setMessage(
+          'This browser does not provide camera access. Try a current mobile browser over HTTPS.',
+        );
+        setSession('error');
+        return;
+      }
 
-    stopCamera();
-    setSession('requestingCamera');
-    setMessage('Waiting for camera permission…');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: facingMode },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-      });
-      streamRef.current = stream;
-      const video = videoRef.current;
-      if (!video) return;
-      video.srcObject = stream;
-      await video.play();
-      setSession('previewing');
-      setMessage('Camera ready. Tracking is intentionally added in Phase 1.');
-    } catch (error) {
-      const detail =
-        error instanceof DOMException ? error.name : 'Unknown error';
-      setMessage(
-        `Could not start the camera (${detail}). Check permission, then try again.`,
-      );
-      setSession('error');
-    }
-  }, [facingMode, stopCamera]);
+      stopCamera();
+      setSession('requestingCamera');
+      setMessage('Waiting for camera permission…');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: requestedFacingMode },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        });
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        await video.play();
+        setSession('previewing');
+        setMessage('Camera ready. Tracking is intentionally added in Phase 1.');
+      } catch (error) {
+        const detail =
+          error instanceof DOMException ? error.name : 'Unknown error';
+        setMessage(
+          `Could not start the camera (${detail}). Check permission, then try again.`,
+        );
+        setSession('error');
+      }
+    },
+    [facingMode, stopCamera],
+  );
+
+  const switchCamera = useCallback(() => {
+    const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextFacingMode);
+    setMessage('Switching camera…');
+    void startCamera(nextFacingMode);
+  }, [facingMode, startCamera]);
 
   useEffect(() => stopCamera, [stopCamera]);
 
@@ -262,18 +272,7 @@ export function ARSessionPage() {
           >
             {session === 'requestingCamera' ? 'Connecting…' : 'Start camera'}
           </button>
-          <button
-            className="secondary"
-            type="button"
-            onClick={() => {
-              setFacingMode((mode) =>
-                mode === 'user' ? 'environment' : 'user',
-              );
-              setMessage('Camera side changed. Start camera to apply it.');
-              stopCamera();
-              setSession('idle');
-            }}
-          >
+          <button className="secondary" type="button" onClick={switchCamera}>
             Use {facingMode === 'user' ? 'rear' : 'selfie'} camera
           </button>
           <button

@@ -1,10 +1,12 @@
 import type { PoseTracker } from '../contracts';
+import { MonotonicTimestamp } from './MonotonicTimestamp';
 
 export function startFrameScheduler(
   video: HTMLVideoElement,
   tracker: PoseTracker,
 ): () => void {
   let active = true;
+  const timestamps = new MonotonicTimestamp();
   let busy = false;
   let lastTimestamp = 0;
   const minIntervalMs = 1000 / 20;
@@ -28,10 +30,10 @@ export function startFrameScheduler(
     }
   };
 
-  const tick = (_now: number, metadata?: VideoFrameCallbackMetadata) => {
-    void submitNewestFrame(
-      metadata?.mediaTime ? metadata.mediaTime * 1000 : performance.now(),
-    );
+  const tick = (_now: number, _metadata?: VideoFrameCallbackMetadata) => {
+    // Video mediaTime resets to zero for a newly selected camera stream.
+    // MediaPipe VIDEO graphs require strictly monotonic timestamps instead.
+    void submitNewestFrame(timestamps.next(performance.now()));
     if (!active) return;
     if ('requestVideoFrameCallback' in video) {
       video.requestVideoFrameCallback(tick);
