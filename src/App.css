@@ -12,7 +12,8 @@
   background: radial-gradient(circle at 45% 38%, #3f5041, #151b16 60%, #090a09);
 }
 .camera-feed,
-.debug-grid {
+.debug-grid,
+.pose-overlay {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -26,6 +27,9 @@
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.25s ease;
+}
+.pose-overlay {
+  pointer-events: none;
 }
 .debug-grid.is-visible {
   opacity: 1;
