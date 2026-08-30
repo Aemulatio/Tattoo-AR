@@ -69,7 +69,7 @@ export function ARSessionPage() {
         video.srcObject = stream;
         await video.play();
         setSession('previewing');
-        setMessage('Camera ready. Tracking is intentionally added in Phase 1.');
+        setMessage('Camera ready. Loading pose tracker…');
       } catch (error) {
         const detail =
           error instanceof DOMException ? error.name : 'Unknown error';
@@ -159,11 +159,12 @@ export function ARSessionPage() {
         });
         startScheduling();
       })
-      .catch((error: unknown) =>
-        setTrackerMessage(
-          `Tracker failed: ${error instanceof Error ? error.message : 'unknown error'}`,
-        ),
-      );
+      .catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : 'unknown error';
+        setTrackerMessage(`Tracker failed: ${detail}`);
+        setMessage(`Could not load pose tracking (${detail}). Try again.`);
+        setSession('error');
+      });
     return () => {
       cancelled = true;
       stopFrames();
