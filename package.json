@@ -1,0 +1,35 @@
+{
+  "name": "ar_tattoo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "browsers": "browserslist",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "~1.0.1",
+    "@react-three/fiber": "~9.7.0",
+    "react": "~19.2.8",
+    "react-dom": "~19.2.8",
+    "three": "~0.185.1"
+  },
+  "devDependencies": {
+    "@types/node": "~24.13.3",
+    "@types/react": "~19.2.18",
+    "@types/react-dom": "~19.2.4",
+    "@vitejs/plugin-react-swc": "~4.3.3",
+    "browserslist": "~4.28.8",
+    "browserslist-to-esbuild": "~2.1.1",
+    "oxlint": "~1.79.0",
+    "prettier": "~3.9.6",
+    "typescript": "~6.0.2",
+    "vite": "~8.2.2"
+  }
+}
