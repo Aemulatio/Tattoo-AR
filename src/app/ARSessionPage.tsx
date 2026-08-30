@@ -4,6 +4,7 @@ import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
 import type { PoseTracker } from '../ar-engine/contracts';
+import { TrackingMetrics } from '../ar-engine/diagnostics/TrackingMetrics';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -18,6 +19,8 @@ export function ARSessionPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const trackerRef = useRef<PoseTracker | null>(null);
   const isMirroredRef = useRef(true);
+  const metricsRef = useRef(new TrackingMetrics());
+  const lastMetricsUiRef = useRef(0);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [isMirrored, setIsMirrored] = useState(true);
@@ -104,6 +107,13 @@ export function ARSessionPage() {
         if (cancelled) return;
         setTrackerMessage('Pose tracker active (main-thread fallback)');
         unsubscribe = tracker.subscribe((frame) => {
+          const metrics = metricsRef.current.recordResult(frame);
+          if (frame.timestampMs - lastMetricsUiRef.current >= 1000) {
+            lastMetricsUiRef.current = frame.timestampMs;
+            setTrackerMessage(
+              `Pose tracker active (fallback) · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms`,
+            );
+          }
           const rect = video.getBoundingClientRect();
           canvas.width = Math.round(rect.width);
           canvas.height = Math.round(rect.height);
