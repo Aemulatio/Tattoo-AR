@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
 import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
+import { syncCanvasSize } from '../ar-engine/rendering/syncCanvasSize';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
+import { WorkerPoseTracker } from '../ar-engine/tracking/WorkerPoseTracker';
+import { FallbackPoseTracker } from '../ar-engine/tracking/FallbackPoseTracker';
+import { TrackingMetrics } from '../ar-engine/diagnostics/TrackingMetrics';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -15,8 +19,10 @@ export function ARSessionPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const trackerRef = useRef<MainThreadPoseTracker | null>(null);
+  const trackerRef = useRef<FallbackPoseTracker | null>(null);
   const isMirroredRef = useRef(true);
+  const metricsRef = useRef(new TrackingMetrics());
+  const lastMetricsUiRef = useRef(0);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [isMirrored, setIsMirrored] = useState(true);
@@ -36,43 +42,53 @@ export function ARSessionPage() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  const startCamera = useCallback(async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setMessage(
-        'This browser does not provide camera access. Try a current mobile browser over HTTPS.',
-      );
-      setSession('error');
-      return;
-    }
+  const startCamera = useCallback(
+    async (requestedFacingMode = facingMode) => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setMessage(
+          'This browser does not provide camera access. Try a current mobile browser over HTTPS.',
+        );
+        setSession('error');
+        return;
+      }
 
-    stopCamera();
-    setSession('requestingCamera');
-    setMessage('Waiting for camera permission…');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: facingMode },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-      });
-      streamRef.current = stream;
-      const video = videoRef.current;
-      if (!video) return;
-      video.srcObject = stream;
-      await video.play();
-      setSession('previewing');
-      setMessage('Camera ready. Tracking is intentionally added in Phase 1.');
-    } catch (error) {
-      const detail =
-        error instanceof DOMException ? error.name : 'Unknown error';
-      setMessage(
-        `Could not start the camera (${detail}). Check permission, then try again.`,
-      );
-      setSession('error');
-    }
-  }, [facingMode, stopCamera]);
+      stopCamera();
+      setSession('requestingCamera');
+      setMessage('Waiting for camera permission…');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: requestedFacingMode },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        });
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        await video.play();
+        setSession('previewing');
+        setMessage('Camera ready. Loading pose tracker…');
+      } catch (error) {
+        const detail =
+          error instanceof DOMException ? error.name : 'Unknown error';
+        setMessage(
+          `Could not start the camera (${detail}). Check permission, then try again.`,
+        );
+        setSession('error');
+      }
+    },
+    [facingMode, stopCamera],
+  );
+
+  const switchCamera = useCallback(() => {
+    const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextFacingMode);
+    setMessage('Switching camera…');
+    void startCamera(nextFacingMode);
+  }, [facingMode, startCamera]);
 
   useEffect(() => stopCamera, [stopCamera]);
 
@@ -80,24 +96,59 @@ export function ARSessionPage() {
     const video = videoRef.current;
     const canvas = poseCanvasRef.current;
     if (session !== 'previewing' || !video || !canvas) return;
-    const tracker = trackerRef.current ?? new MainThreadPoseTracker();
+    const tracker =
+      trackerRef.current ??
+      new FallbackPoseTracker(
+        typeof Worker === 'undefined' ? null : () => new WorkerPoseTracker(),
+        () => new MainThreadPoseTracker(),
+      );
     trackerRef.current = tracker;
     const renderer = new PoseDebugRenderer(canvas);
     let stopFrames: () => void = () => {};
     let unsubscribe: () => void = () => {};
     let cancelled = false;
+    let initialized = false;
+    const startScheduling = () => {
+      stopFrames();
+      if (!cancelled && !document.hidden) {
+        stopFrames = startFrameScheduler(video, tracker, {
+          onFrameDropped: () => metricsRef.current.recordDrop(),
+        });
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) stopFrames();
+      else if (initialized) startScheduling();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     void tracker
       .initialize({
-        wasmRoot: `${import.meta.env.BASE_URL}wasm`,
+        // A runtime URL prevents Vite from treating MediaPipe's dynamic WASM
+        // loader import as a source-module import from /public.
+        wasmRoot: new URL(
+          `${import.meta.env.BASE_URL}wasm/`,
+          window.location.origin,
+        ).href,
         modelAssetPath: `${import.meta.env.BASE_URL}models/pose_landmarker_full.task`,
       })
       .then(() => {
         if (cancelled) return;
-        setTrackerMessage('Pose tracker active (main-thread fallback)');
+        initialized = true;
+        const trackerMode =
+          tracker.executionMode === 'worker'
+            ? 'worker'
+            : 'main-thread fallback';
+        setTrackerMessage(`Pose tracker active (${trackerMode})`);
         unsubscribe = tracker.subscribe((frame) => {
+          const metrics = metricsRef.current.recordResult(frame);
+          if (frame.timestampMs - lastMetricsUiRef.current >= 1000) {
+            lastMetricsUiRef.current = frame.timestampMs;
+            setTrackerMessage(
+              `Pose tracker active (${trackerMode}) · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms · ${metrics.droppedFrames} drops`,
+            );
+          }
           const rect = video.getBoundingClientRect();
-          canvas.width = Math.round(rect.width);
-          canvas.height = Math.round(rect.height);
+          syncCanvasSize(canvas, rect.width, rect.height);
           const transform = new ViewportTransform({
             source: { width: video.videoWidth, height: video.videoHeight },
             display: { width: rect.width, height: rect.height },
@@ -109,18 +160,23 @@ export function ARSessionPage() {
             height: video.videoHeight,
           });
         });
-        stopFrames = startFrameScheduler(video, tracker);
+        startScheduling();
       })
-      .catch((error: unknown) =>
-        setTrackerMessage(
-          `Tracker failed: ${error instanceof Error ? error.message : 'unknown error'}`,
-        ),
-      );
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (trackerRef.current === tracker) trackerRef.current = null;
+        void tracker.dispose();
+        const detail = error instanceof Error ? error.message : 'unknown error';
+        setTrackerMessage(`Tracker failed: ${detail}`);
+        setMessage(`Could not load pose tracking (${detail}). Try again.`);
+        setSession('error');
+      });
     return () => {
       cancelled = true;
       stopFrames();
       unsubscribe();
       renderer.clear();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [session]);
 
@@ -239,18 +295,7 @@ export function ARSessionPage() {
           >
             {session === 'requestingCamera' ? 'Connecting…' : 'Start camera'}
           </button>
-          <button
-            className="secondary"
-            type="button"
-            onClick={() => {
-              setFacingMode((mode) =>
-                mode === 'user' ? 'environment' : 'user',
-              );
-              setMessage('Camera side changed. Start camera to apply it.');
-              stopCamera();
-              setSession('idle');
-            }}
-          >
+          <button className="secondary" type="button" onClick={switchCamera}>
             Use {facingMode === 'user' ? 'rear' : 'selfie'} camera
           </button>
           <button

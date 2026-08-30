@@ -65,17 +65,17 @@ The target is a convincing visual try-on, not a medical or millimetre-accurate p
 
 ### 5.1 Technology choices
 
-| Concern | Decision | Notes |
-| --- | --- | --- |
-| UI | React + TypeScript | Controls and coarse application state only |
-| Build | Vite | Keep the PoC simple; pin exact dependency versions in the lockfile |
-| Pose and mask | `@mediapipe/tasks-vision` Pose Landmarker | Outputs normalized landmarks, world landmarks, visibility, and optional segmentation |
-| Rendering | Three.js with `WebGLRenderer` | Use a custom `BufferGeometry`; do not use `DecalGeometry` for the limb surface |
-| Tracking execution | Dedicated Worker when supported | `detectForVideo()` is synchronous; keep it off the UI thread |
-| Frame scheduling | `requestVideoFrameCallback`, with a documented fallback | Submit only the newest available frame to tracking |
-| Smoothing | One Euro Filter | Separate filters for position, radius, and axial orientation |
-| Tests | Vitest + Playwright | Pure math tests, adapter tests, and browser smoke tests |
-| Persistence | In memory for MVP | Optional IndexedDB session restore is a later feature |
+| Concern            | Decision                                                | Notes                                                                                |
+| ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| UI                 | React + TypeScript                                      | Controls and coarse application state only                                           |
+| Build              | Vite                                                    | Keep the PoC simple; pin exact dependency versions in the lockfile                   |
+| Pose and mask      | `@mediapipe/tasks-vision` Pose Landmarker               | Outputs normalized landmarks, world landmarks, visibility, and optional segmentation |
+| Rendering          | Three.js with `WebGLRenderer`                           | Use a custom `BufferGeometry`; do not use `DecalGeometry` for the limb surface       |
+| Tracking execution | Dedicated Worker when supported                         | `detectForVideo()` is synchronous; keep it off the UI thread                         |
+| Frame scheduling   | `requestVideoFrameCallback`, with a documented fallback | Submit only the newest available frame to tracking                                   |
+| Smoothing          | One Euro Filter                                         | Separate filters for position, radius, and axial orientation                         |
+| Tests              | Vitest + Playwright                                     | Pure math tests, adapter tests, and browser smoke tests                              |
+| Persistence        | In memory for MVP                                       | Optional IndexedDB session restore is a later feature                                |
 
 Do not hardcode major-version-specific APIs in this ADR. At project bootstrap, install current compatible releases, commit the lockfile, and record the selected versions in the README.
 
@@ -150,9 +150,7 @@ These are logical contracts. Codex may add implementation details but must prese
 ```ts
 export type BodySide = 'left' | 'right';
 
-export type BodyRegion =
-  | 'leftForearm'
-  | 'rightForearm';
+export type BodyRegion = 'leftForearm' | 'rightForearm';
 
 export interface Vec2 {
   x: number;
@@ -456,7 +454,8 @@ Acceptance:
 - wrist, elbow, shoulder, thumb, index, and pinky points align with the preview;
 - UI controls stay responsive during tracking;
 - memory does not grow continuously during a three-minute session;
-- switching cameras tears down and recreates the tracker cleanly.
+- switching cameras restarts the camera stream and frame scheduler cleanly while
+  reusing the loaded tracker.
 
 ### Phase 2 — Smoothing, confidence, and loss recovery
 
@@ -645,17 +644,17 @@ The MVP is local-only:
 
 ## 17. Risks and mitigations
 
-| Risk | Impact | Mitigation / gate |
-| --- | --- | --- |
-| Forearm axial roll is underconstrained | Tattoo appears to slide around the arm | Phase 3 hard gate; hand landmarks, silhouette, temporal frame, or product restriction |
-| Single RGB camera has no true depth | Incorrect radius/perspective | Treat model as plausible approximation; use world landmarks plus silhouette; communicate scope |
-| Segmentation merges arm and torso | Bad radius or occlusion | Reject contaminated samples; use last valid radius; guide framing |
-| ML blocks or overheats mobile device | Poor UX | Worker, latest-frame backpressure, adaptive cadence, resolution scaling |
-| Selfie mirroring changes handedness | Wrong arm or reversed placement | Canonical unmirrored tracking and a single display transform |
-| Landmark jitter becomes texture jitter | Unconvincing result | One Euro filtering, confidence hysteresis, interpolate renderer state |
-| Worker/browser differences | Unsupported devices | Tracker port with fallback; explicit support matrix |
-| Scope expands to full-body reconstruction | MVP never validates | Enforce non-goals and phase gates in this ADR |
-| Uploaded image looks like a sticker | Low visual quality | Basic ink blend, alpha cleanup, feather; later lighting matching |
+| Risk                                      | Impact                                 | Mitigation / gate                                                                              |
+| ----------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Forearm axial roll is underconstrained    | Tattoo appears to slide around the arm | Phase 3 hard gate; hand landmarks, silhouette, temporal frame, or product restriction          |
+| Single RGB camera has no true depth       | Incorrect radius/perspective           | Treat model as plausible approximation; use world landmarks plus silhouette; communicate scope |
+| Segmentation merges arm and torso         | Bad radius or occlusion                | Reject contaminated samples; use last valid radius; guide framing                              |
+| ML blocks or overheats mobile device      | Poor UX                                | Worker, latest-frame backpressure, adaptive cadence, resolution scaling                        |
+| Selfie mirroring changes handedness       | Wrong arm or reversed placement        | Canonical unmirrored tracking and a single display transform                                   |
+| Landmark jitter becomes texture jitter    | Unconvincing result                    | One Euro filtering, confidence hysteresis, interpolate renderer state                          |
+| Worker/browser differences                | Unsupported devices                    | Tracker port with fallback; explicit support matrix                                            |
+| Scope expands to full-body reconstruction | MVP never validates                    | Enforce non-goals and phase gates in this ADR                                                  |
+| Uploaded image looks like a sticker       | Low visual quality                     | Basic ink blend, alpha cleanup, feather; later lighting matching                               |
 
 ## 18. Consequences
 
