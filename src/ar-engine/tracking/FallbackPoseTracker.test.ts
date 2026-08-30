@@ -28,8 +28,10 @@ describe('FallbackPoseTracker', () => {
     const tracker = new FallbackPoseTracker(() => worker, createFallback);
 
     await tracker.initialize(config);
+    await tracker.initialize(config);
 
     expect(tracker.executionMode).toBe('worker');
+    expect(worker.initialize).toHaveBeenCalledOnce();
     expect(worker.initialize).toHaveBeenCalledWith(config);
     expect(createFallback).not.toHaveBeenCalled();
   });
