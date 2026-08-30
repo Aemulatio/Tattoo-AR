@@ -105,6 +105,20 @@ export function ARSessionPage() {
     let stopFrames: () => void = () => {};
     let unsubscribe: () => void = () => {};
     let cancelled = false;
+    let initialized = false;
+    const startScheduling = () => {
+      stopFrames();
+      if (!cancelled && !document.hidden) {
+        stopFrames = startFrameScheduler(video, tracker, {
+          onFrameDropped: () => metricsRef.current.recordDrop(),
+        });
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) stopFrames();
+      else if (initialized) startScheduling();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     void tracker
       .initialize({
         // A runtime URL prevents Vite from treating MediaPipe's dynamic WASM
@@ -117,6 +131,7 @@ export function ARSessionPage() {
       })
       .then(() => {
         if (cancelled) return;
+        initialized = true;
         setTrackerMessage(
           `Pose tracker active (${tracker instanceof WorkerPoseTracker ? 'worker' : 'main-thread fallback'})`,
         );
@@ -142,9 +157,7 @@ export function ARSessionPage() {
             height: video.videoHeight,
           });
         });
-        stopFrames = startFrameScheduler(video, tracker, {
-          onFrameDropped: () => metricsRef.current.recordDrop(),
-        });
+        startScheduling();
       })
       .catch((error: unknown) =>
         setTrackerMessage(
@@ -156,6 +169,7 @@ export function ARSessionPage() {
       stopFrames();
       unsubscribe();
       renderer.clear();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [session]);
 
