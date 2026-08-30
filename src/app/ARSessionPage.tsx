@@ -15,6 +15,8 @@ export function ARSessionPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const trackerRef = useRef<MainThreadPoseTracker | null>(null);
+  const isMirroredRef = useRef(true);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [isMirrored, setIsMirrored] = useState(true);
@@ -23,6 +25,10 @@ export function ARSessionPage() {
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
   const debug = new URLSearchParams(window.location.search).has('debug');
   const capabilities = getCapabilityReport();
+
+  useEffect(() => {
+    isMirroredRef.current = isMirrored;
+  }, [isMirrored]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -74,7 +80,8 @@ export function ARSessionPage() {
     const video = videoRef.current;
     const canvas = poseCanvasRef.current;
     if (session !== 'previewing' || !video || !canvas) return;
-    const tracker = new MainThreadPoseTracker();
+    const tracker = trackerRef.current ?? new MainThreadPoseTracker();
+    trackerRef.current = tracker;
     const renderer = new PoseDebugRenderer(canvas);
     let stopFrames: () => void = () => {};
     let unsubscribe: () => void = () => {};
@@ -95,7 +102,7 @@ export function ARSessionPage() {
             source: { width: video.videoWidth, height: video.videoHeight },
             display: { width: rect.width, height: rect.height },
             fit: 'cover',
-            mirrored: isMirrored,
+            mirrored: isMirroredRef.current,
           });
           renderer.draw(frame, transform, {
             width: video.videoWidth,
@@ -114,9 +121,16 @@ export function ARSessionPage() {
       stopFrames();
       unsubscribe();
       renderer.clear();
-      void tracker.dispose();
     };
-  }, [isMirrored, session]);
+  }, [session]);
+
+  useEffect(
+    () => () => {
+      void trackerRef.current?.dispose();
+      trackerRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     const video = videoRef.current;
