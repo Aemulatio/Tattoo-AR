@@ -1,7 +1,8 @@
 import './App.css';
+import { ARSessionPage } from './app/ARSessionPage';
 
 function App() {
-  return <></>;
+  return <ARSessionPage />;
 }
 
 export default App;

@@ -1,0 +1,20 @@
+pre-commit:
+  commands:
+    prettier:
+      glob: '*.{css,html,js,jsx,json,md,ts,tsx,yaml,yml}'
+      run: npx --no -- prettier --write {staged_files}
+      stage_fixed: true
+    oxlint:
+      glob: '*.{js,jsx,ts,tsx}'
+      run: npx --no -- oxlint --fix {staged_files}
+      stage_fixed: true
+    type-check:
+      run: npm run typecheck
+    related-tests:
+      glob: '*.{js,jsx,ts,tsx}'
+      run: npx --no -- vitest related --run {staged_files}
+
+commit-msg:
+  commands:
+    conventional-commit:
+      run: npx --no -- commitlint --edit {1}

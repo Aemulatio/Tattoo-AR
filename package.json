@@ -11,7 +11,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "browsers": "browserslist",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc -b --pretty false",
+    "prepare": "lefthook install",
+    "commitlint": "commitlint"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "~1.0.1",
@@ -21,15 +25,19 @@
     "three": "~0.185.1"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
     "@types/node": "~24.13.3",
     "@types/react": "~19.2.18",
     "@types/react-dom": "~19.2.4",
     "@vitejs/plugin-react-swc": "~4.3.3",
     "browserslist": "~4.28.8",
     "browserslist-to-esbuild": "~2.1.1",
+    "lefthook": "^2.1.12",
     "oxlint": "~1.79.0",
     "prettier": "~3.9.6",
     "typescript": "~6.0.2",
-    "vite": "~8.2.2"
+    "vite": "~8.2.2",
+    "vitest": "~4.0.18"
   }
 }
