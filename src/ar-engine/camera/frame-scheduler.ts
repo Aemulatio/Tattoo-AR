@@ -1,9 +1,14 @@
 import type { PoseTracker } from '../contracts';
 import { MonotonicTimestamp } from './MonotonicTimestamp';
 
+export interface FrameSchedulerOptions {
+  onFrameDropped?(): void;
+}
+
 export function startFrameScheduler(
   video: HTMLVideoElement,
   tracker: PoseTracker,
+  options: FrameSchedulerOptions = {},
 ): () => void {
   let active = true;
   const timestamps = new MonotonicTimestamp();
@@ -12,13 +17,12 @@ export function startFrameScheduler(
   const minIntervalMs = 1000 / 20;
 
   const submitNewestFrame = async (timestampMs: number) => {
-    if (
-      !active ||
-      busy ||
-      timestampMs - lastTimestamp < minIntervalMs ||
-      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
-    )
+    if (!active || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
       return;
+    if (busy || timestampMs - lastTimestamp < minIntervalMs) {
+      options.onFrameDropped?.();
+      return;
+    }
     busy = true;
     lastTimestamp = timestampMs;
     try {

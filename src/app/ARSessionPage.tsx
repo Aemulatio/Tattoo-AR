@@ -125,7 +125,7 @@ export function ARSessionPage() {
           if (frame.timestampMs - lastMetricsUiRef.current >= 1000) {
             lastMetricsUiRef.current = frame.timestampMs;
             setTrackerMessage(
-              `Pose tracker active · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms`,
+              `Pose tracker active · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms · ${metrics.droppedFrames} drops`,
             );
           }
           const rect = video.getBoundingClientRect();
@@ -142,7 +142,9 @@ export function ARSessionPage() {
             height: video.videoHeight,
           });
         });
-        stopFrames = startFrameScheduler(video, tracker);
+        stopFrames = startFrameScheduler(video, tracker, {
+          onFrameDropped: () => metricsRef.current.recordDrop(),
+        });
       })
       .catch((error: unknown) =>
         setTrackerMessage(
