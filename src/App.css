@@ -1,7 +1,8 @@
 .ar-shell {
-  min-height: 100svh;
+  height: 100svh;
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(340px, 0.6fr);
+  overflow: hidden;
   background: #111311;
 }
 .camera-stage {
@@ -85,12 +86,14 @@
   line-height: 1.7;
 }
 .control-panel {
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   padding: clamp(30px, 6vw, 92px);
   border-left: 1px solid #30352e;
   background: #181b18;
+  overflow-y: auto;
 }
 .eyebrow {
   margin: 0 0 18px;
@@ -176,7 +179,7 @@
 @media (max-width: 780px) {
   .ar-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: 57svh auto;
+    grid-template-rows: 57svh minmax(0, 1fr);
   }
   .camera-stage {
     min-height: 0;

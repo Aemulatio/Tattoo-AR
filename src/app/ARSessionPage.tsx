@@ -13,6 +13,7 @@ export function ARSessionPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
+  const [isMirrored, setIsMirrored] = useState(true);
   const [message, setMessage] = useState(initialError);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
   const debug = new URLSearchParams(window.location.search).has('debug');
@@ -101,13 +102,13 @@ export function ARSessionPage() {
     };
     const resize = new ResizeObserver(drawGrid);
     resize.observe(video);
-    video.addEventListener('loadedmetadata', () => {
+    const onLoadedMetadata = () => {
       const rect = video.getBoundingClientRect();
       const transform = new ViewportTransform({
         source: { width: video.videoWidth, height: video.videoHeight },
         display: { width: rect.width, height: rect.height },
         fit: 'cover',
-        mirrored: facingMode === 'user',
+        mirrored: isMirrored,
       });
       const center = transform.sourceToDisplay({
         x: video.videoWidth / 2,
@@ -118,16 +119,20 @@ export function ARSessionPage() {
         display: `${Math.round(rect.width)} × ${Math.round(rect.height)} · center ${Math.round(center.x)},${Math.round(center.y)}`,
       });
       drawGrid();
-    });
-    return () => resize.disconnect();
-  }, [facingMode]);
+    };
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
+    return () => {
+      resize.disconnect();
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+    };
+  }, [isMirrored]);
 
   return (
     <main className="ar-shell">
       <section className="camera-stage" aria-label="Live camera preview">
         <video
           ref={videoRef}
-          className={`camera-feed ${facingMode === 'user' ? 'is-mirrored' : ''}`}
+          className={`camera-feed ${isMirrored ? 'is-mirrored' : ''}`}
           playsInline
           muted
         />
@@ -174,6 +179,13 @@ export function ARSessionPage() {
             }}
           >
             Use {facingMode === 'user' ? 'rear' : 'selfie'} camera
+          </button>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => setIsMirrored((mirrored) => !mirrored)}
+          >
+            {isMirrored ? 'Unmirror preview' : 'Mirror preview'}
           </button>
         </div>
         {session === 'error' && (
