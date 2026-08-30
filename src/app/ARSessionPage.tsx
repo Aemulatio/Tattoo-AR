@@ -4,7 +4,7 @@ import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
 import { WorkerPoseTracker } from '../ar-engine/tracking/WorkerPoseTracker';
-import type { PoseTracker } from '../ar-engine/contracts';
+import { FallbackPoseTracker } from '../ar-engine/tracking/FallbackPoseTracker';
 import { TrackingMetrics } from '../ar-engine/diagnostics/TrackingMetrics';
 import { getCapabilityReport, type SessionState } from './session-state';
 
@@ -18,7 +18,7 @@ export function ARSessionPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const trackerRef = useRef<PoseTracker | null>(null);
+  const trackerRef = useRef<FallbackPoseTracker | null>(null);
   const isMirroredRef = useRef(true);
   const metricsRef = useRef(new TrackingMetrics());
   const lastMetricsUiRef = useRef(0);
@@ -97,9 +97,10 @@ export function ARSessionPage() {
     if (session !== 'previewing' || !video || !canvas) return;
     const tracker =
       trackerRef.current ??
-      (typeof Worker !== 'undefined'
-        ? new WorkerPoseTracker()
-        : new MainThreadPoseTracker());
+      new FallbackPoseTracker(
+        typeof Worker === 'undefined' ? null : () => new WorkerPoseTracker(),
+        () => new MainThreadPoseTracker(),
+      );
     trackerRef.current = tracker;
     const renderer = new PoseDebugRenderer(canvas);
     let stopFrames: () => void = () => {};
@@ -132,15 +133,17 @@ export function ARSessionPage() {
       .then(() => {
         if (cancelled) return;
         initialized = true;
-        setTrackerMessage(
-          `Pose tracker active (${tracker instanceof WorkerPoseTracker ? 'worker' : 'main-thread fallback'})`,
-        );
+        const trackerMode =
+          tracker.executionMode === 'worker'
+            ? 'worker'
+            : 'main-thread fallback';
+        setTrackerMessage(`Pose tracker active (${trackerMode})`);
         unsubscribe = tracker.subscribe((frame) => {
           const metrics = metricsRef.current.recordResult(frame);
           if (frame.timestampMs - lastMetricsUiRef.current >= 1000) {
             lastMetricsUiRef.current = frame.timestampMs;
             setTrackerMessage(
-              `Pose tracker active · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms · ${metrics.droppedFrames} drops`,
+              `Pose tracker active (${trackerMode}) · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms · ${metrics.droppedFrames} drops`,
             );
           }
           const rect = video.getBoundingClientRect();
@@ -160,6 +163,9 @@ export function ARSessionPage() {
         startScheduling();
       })
       .catch((error: unknown) => {
+        if (cancelled) return;
+        if (trackerRef.current === tracker) trackerRef.current = null;
+        void tracker.dispose();
         const detail = error instanceof Error ? error.message : 'unknown error';
         setTrackerMessage(`Tracker failed: ${detail}`);
         setMessage(`Could not load pose tracking (${detail}). Try again.`);
