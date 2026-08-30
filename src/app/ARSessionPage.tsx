@@ -88,8 +88,8 @@ export function ARSessionPage() {
     let cancelled = false;
     void tracker
       .initialize({
-        wasmRoot: '/wasm',
-        modelAssetPath: '/models/pose_landmarker_full.task',
+        wasmRoot: `${import.meta.env.BASE_URL}wasm`,
+        modelAssetPath: `${import.meta.env.BASE_URL}models/pose_landmarker_full.task`,
       })
       .then(() => {
         if (cancelled) return;
