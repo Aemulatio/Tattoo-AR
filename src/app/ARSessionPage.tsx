@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
+import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
+import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
+import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -10,14 +13,22 @@ const initialError =
 export function ARSessionPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const poseCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const trackerRef = useRef<MainThreadPoseTracker | null>(null);
+  const isMirroredRef = useRef(true);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [isMirrored, setIsMirrored] = useState(true);
   const [message, setMessage] = useState(initialError);
+  const [trackerMessage, setTrackerMessage] = useState('Tracker idle');
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
   const debug = new URLSearchParams(window.location.search).has('debug');
   const capabilities = getCapabilityReport();
+
+  useEffect(() => {
+    isMirroredRef.current = isMirrored;
+  }, [isMirrored]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -64,6 +75,62 @@ export function ARSessionPage() {
   }, [facingMode, stopCamera]);
 
   useEffect(() => stopCamera, [stopCamera]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = poseCanvasRef.current;
+    if (session !== 'previewing' || !video || !canvas) return;
+    const tracker = trackerRef.current ?? new MainThreadPoseTracker();
+    trackerRef.current = tracker;
+    const renderer = new PoseDebugRenderer(canvas);
+    let stopFrames: () => void = () => {};
+    let unsubscribe: () => void = () => {};
+    let cancelled = false;
+    void tracker
+      .initialize({
+        wasmRoot: `${import.meta.env.BASE_URL}wasm`,
+        modelAssetPath: `${import.meta.env.BASE_URL}models/pose_landmarker_full.task`,
+      })
+      .then(() => {
+        if (cancelled) return;
+        setTrackerMessage('Pose tracker active (main-thread fallback)');
+        unsubscribe = tracker.subscribe((frame) => {
+          const rect = video.getBoundingClientRect();
+          canvas.width = Math.round(rect.width);
+          canvas.height = Math.round(rect.height);
+          const transform = new ViewportTransform({
+            source: { width: video.videoWidth, height: video.videoHeight },
+            display: { width: rect.width, height: rect.height },
+            fit: 'cover',
+            mirrored: isMirroredRef.current,
+          });
+          renderer.draw(frame, transform, {
+            width: video.videoWidth,
+            height: video.videoHeight,
+          });
+        });
+        stopFrames = startFrameScheduler(video, tracker);
+      })
+      .catch((error: unknown) =>
+        setTrackerMessage(
+          `Tracker failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        ),
+      );
+    return () => {
+      cancelled = true;
+      stopFrames();
+      unsubscribe();
+      renderer.clear();
+    };
+  }, [session]);
+
+  useEffect(
+    () => () => {
+      void trackerRef.current?.dispose();
+      trackerRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -141,9 +208,15 @@ export function ARSessionPage() {
           className={`debug-grid ${debug ? 'is-visible' : ''}`}
           aria-hidden="true"
         />
+        <canvas
+          ref={poseCanvasRef}
+          className="pose-overlay"
+          aria-hidden="true"
+        />
         <div className="camera-chrome">
           <span>LIVE / FOREARM POC</span>
           <span className={`status-dot ${session}`} /> {session}
+          <span>{trackerMessage}</span>
         </div>
         {session !== 'previewing' && (
           <div className="stage-message">{message}</div>

@@ -4,7 +4,7 @@
     "browser": true
   },
   "plugins": ["react", "typescript", "oxc"],
-  "ignorePatterns": ["dist/**", "node_modules/**"],
+  "ignorePatterns": ["dist/**", "node_modules/**", "public/wasm/**"],
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]

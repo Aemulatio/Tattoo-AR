@@ -2,10 +2,12 @@ pre-commit:
   commands:
     prettier:
       glob: '*.{css,html,js,jsx,json,md,ts,tsx,yaml,yml}'
+      exclude: 'public/wasm/**'
       run: npx --no -- prettier --write {staged_files}
       stage_fixed: true
     oxlint:
       glob: '*.{js,jsx,ts,tsx}'
+      exclude: 'public/wasm/**'
       run: npx --no -- oxlint --fix {staged_files}
       stage_fixed: true
     type-check:
