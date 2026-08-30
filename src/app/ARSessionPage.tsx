@@ -3,6 +3,7 @@ import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
 import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
+import type { PoseTracker } from '../ar-engine/contracts';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -15,7 +16,7 @@ export function ARSessionPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const trackerRef = useRef<MainThreadPoseTracker | null>(null);
+  const trackerRef = useRef<PoseTracker | null>(null);
   const isMirroredRef = useRef(true);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
@@ -80,6 +81,9 @@ export function ARSessionPage() {
     const video = videoRef.current;
     const canvas = poseCanvasRef.current;
     if (session !== 'previewing' || !video || !canvas) return;
+    // The MediaPipe Emscripten loader cannot currently expose its ModuleFactory
+    // through Vite's module-worker boundary. Keep this stable compatibility
+    // adapter active until the dedicated Worker asset loader is integrated.
     const tracker = trackerRef.current ?? new MainThreadPoseTracker();
     trackerRef.current = tracker;
     const renderer = new PoseDebugRenderer(canvas);
@@ -88,7 +92,12 @@ export function ARSessionPage() {
     let cancelled = false;
     void tracker
       .initialize({
-        wasmRoot: `${import.meta.env.BASE_URL}wasm`,
+        // A runtime URL prevents Vite from treating MediaPipe's dynamic WASM
+        // loader import as a source-module import from /public.
+        wasmRoot: new URL(
+          `${import.meta.env.BASE_URL}wasm/`,
+          window.location.origin,
+        ).href,
         modelAssetPath: `${import.meta.env.BASE_URL}models/pose_landmarker_full.task`,
       })
       .then(() => {
