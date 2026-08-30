@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
 import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
+import { syncCanvasSize } from '../ar-engine/rendering/syncCanvasSize';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
 import { WorkerPoseTracker } from '../ar-engine/tracking/WorkerPoseTracker';
 import { FallbackPoseTracker } from '../ar-engine/tracking/FallbackPoseTracker';
@@ -147,8 +148,7 @@ export function ARSessionPage() {
             );
           }
           const rect = video.getBoundingClientRect();
-          canvas.width = Math.round(rect.width);
-          canvas.height = Math.round(rect.height);
+          syncCanvasSize(canvas, rect.width, rect.height);
           const transform = new ViewportTransform({
             source: { width: video.videoWidth, height: video.videoHeight },
             display: { width: rect.width, height: rect.height },
