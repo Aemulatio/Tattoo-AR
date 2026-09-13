@@ -1,7 +1,7 @@
-import type { PoseFrame, PosePoint } from '../contracts';
+import type { BodySide, PoseFrame, PosePoint } from '../contracts';
 import { PoseLandmark } from './landmark-indices';
 
-export type BodySide = 'left' | 'right';
+export type { BodySide } from '../contracts';
 
 export interface PoseConfidence {
   value: number;

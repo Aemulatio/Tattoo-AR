@@ -1,11 +1,10 @@
-import type { PoseFrame } from '../contracts';
+import type { BodySide, PoseFrame } from '../contracts';
 import {
   PoseSmoother,
   type PoseSmootherOptions,
 } from '../filtering/PoseSmoother';
 import {
   evaluatePoseConfidence,
-  type BodySide,
   type PoseConfidence,
   type PoseConfidenceOptions,
 } from './confidence';
@@ -29,6 +28,7 @@ export interface PoseStabilizerOptions {
   sideLockThreshold?: number;
   usableConfidence?: number;
   lostFadeDurationMs?: number;
+  selectedSide?: BodySide | null;
 }
 
 export class PoseStabilizer {
@@ -48,10 +48,17 @@ export class PoseStabilizer {
     this.sideLockThreshold = options.sideLockThreshold ?? 0.62;
     this.usableConfidence = options.usableConfidence ?? 0.35;
     this.lostFadeDurationMs = options.lostFadeDurationMs ?? 900;
+    this.selectedSide = options.selectedSide ?? null;
   }
 
   get side(): BodySide | null {
     return this.selectedSide;
+  }
+
+  selectSide(side: BodySide): void {
+    if (side === this.selectedSide) return;
+    this.selectedSide = side;
+    this.resetTracking();
   }
 
   process(frame: PoseFrame, nowMs: number): StabilizedPose {
@@ -111,9 +118,12 @@ export class PoseStabilizer {
   }
 
   reset(): void {
+    this.resetTracking();
+  }
+
+  private resetTracking(): void {
     this.smoother.reset();
     this.stateMachine.reset();
-    this.selectedSide = null;
     this.lastStableFrame = null;
   }
 }

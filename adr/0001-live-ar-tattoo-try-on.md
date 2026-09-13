@@ -1,7 +1,9 @@
 # ADR-0001: Browser architecture for live AR tattoo try-on
 
-- **Status:** Proposed
+- **Status:** Accepted — implementation in progress
 - **Date:** 2026-08-30
+- **Last updated:** 2026-09-13
+- **Implementation:** Phase 3 complete; Phase 4 next
 - **Scope:** Greenfield proof of concept and MVP
 - **First supported region:** One forearm at a time
 - **Primary reader:** Codex and project contributors
@@ -41,6 +43,10 @@ The PoC/MVP must:
 - handle temporary tracking loss without the tattoo jumping to a new location;
 - expose performance and tracking diagnostics in development mode;
 - keep the AR engine independent from React and from a particular tracker implementation.
+
+### 3.1 Supported platform scope
+
+The current MVP validation targets desktop browsers and iOS. Phase 3 was verified on an iPhone 16 Pro Max over the HTTPS development server, with behavior matching the desktop baseline. Android is explicitly excluded from the current MVP because no target device is available for acceptance testing; support may be added after equivalent device validation.
 
 ## 4. Non-goals for the first MVP
 
@@ -415,7 +421,17 @@ docs/
 
 Keep math utilities next to the domain that owns them. Do not create a generic `utils/` dumping ground.
 
-## 13. Implementation plan for Codex
+## 13. Implementation plan and status
+
+| Phase                            | State       | Current evidence                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 0 — capability shell       | Complete    | Camera flow, mirroring, viewport transform, diagnostics, and tooling merged in PR #1                                                                                                                                                                                                                                                                  |
+| Phase 1 — pose tracking          | Complete    | Worker/fallback tracking, backpressure, overlay, cleanup, and memory acceptance merged in PR #3                                                                                                                                                                                                                                                       |
+| Phase 2 — smoothing and recovery | Complete    | One Euro smoothing, confidence hysteresis, loss recovery, and telemetry merged in PR #5                                                                                                                                                                                                                                                               |
+| Phase 3 — forearm surface        | Complete    | Side selection, stable local frame, continuous roll/confidence, reusable 12×24 tapered mesh, UVs, wireframe, seam, callback-local mask radius sampling, temporal radius stabilization, anatomical fallback, and measurable flip/radius telemetry implemented; desktop and iPhone 16 Pro Max checks passed; Android explicitly deferred from MVP scope |
+| Phases 4–7                       | Not started | Phase 4 is unblocked by the completed forearm feasibility gate                                                                                                                                                                                                                                                                                        |
+
+Update this table when a phase is merged or a feasibility gate changes scope.
 
 Each phase is a separate reviewable change. Codex must run the phase's checks and report the acceptance evidence before starting the next phase.
 
@@ -490,7 +506,7 @@ Acceptance gate:
 - during at least approximately ±45° of comfortable forearm roll, orientation changes continuously without 180° flips;
 - radius does not visibly pulse during a stationary five-second hold;
 - losing hand landmarks causes a stable freeze/fallback, not a roll snap;
-- behavior is recorded on at least one target Android device and one target iOS device, or the unsupported target is explicitly removed from MVP scope.
+- behavior is recorded on the declared mobile target, an iPhone 16 Pro Max running iOS; Android is explicitly excluded from the current MVP until equivalent device validation is available.
 
 If axial roll is not convincing, stop. Evaluate one of these product changes before continuing:
 

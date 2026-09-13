@@ -13,11 +13,12 @@ Phase 0 of the browser-based, local-only forearm try-on proof of concept.
 ```bash
 npm install
 npm run dev
+npm run dev:https
 npm test
 npm run build
 ```
 
-Open the app over HTTPS (or localhost) and choose **Start camera**. Add `?debug=1` to show the capability report and display grid. Camera frames stay in the browser and are not uploaded.
+Use `npm run dev` for localhost, or `npm run dev:https` to expose the app over HTTPS on your local network for phone testing. Open the printed Network URL and accept the self-signed development certificate warning. Add `?debug=1` to show the capability report and display grid. Camera frames stay in the browser and are not uploaded.
 
 ## Architecture boundary
 

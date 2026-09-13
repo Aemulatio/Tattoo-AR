@@ -4,10 +4,20 @@ export interface Vec3 {
   z: number;
 }
 
+export type BodySide = 'left' | 'right';
+
+export type BodyRegion = 'leftForearm' | 'rightForearm';
+
 export interface PosePoint {
   image: Vec3;
   world: Vec3;
   visibility: number;
+}
+
+export interface ForearmMaskSample {
+  wristRadiusRatio: number;
+  elbowRadiusRatio: number;
+  confidence: number;
 }
 
 export interface PoseFrame {
@@ -15,6 +25,7 @@ export interface PoseFrame {
   timestampMs: number;
   landmarks: ReadonlyArray<PosePoint>;
   inferenceMs: number;
+  forearmMaskSamples?: Partial<Record<BodySide, ForearmMaskSample>>;
 }
 
 export interface TrackerConfig {

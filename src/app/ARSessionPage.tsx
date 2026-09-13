@@ -13,6 +13,20 @@ import {
   TrackingMetrics,
   type TrackingMetricsSnapshot,
 } from '../ar-engine/diagnostics/TrackingMetrics';
+import {
+  emptyForearmFeasibilitySnapshot,
+  ForearmFeasibilityMonitor,
+} from '../ar-engine/diagnostics/ForearmFeasibilityMonitor';
+import type { BodySide } from '../ar-engine/contracts';
+import {
+  ForearmFrameEstimator,
+  type ForearmLocalFrame,
+} from '../ar-engine/surfaces/forearm/ForearmFrameEstimator';
+import { ForearmGeometry } from '../ar-engine/surfaces/forearm/ForearmGeometry';
+import {
+  ForearmRadiusEstimator,
+  type ForearmRadiusEstimate,
+} from '../ar-engine/surfaces/forearm/ForearmRadiusEstimator';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -36,7 +50,13 @@ export function ARSessionPage() {
   const telemetryCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackerRef = useRef<FallbackPoseTracker | null>(null);
-  const stabilizerRef = useRef(new PoseStabilizer());
+  const stabilizerRef = useRef(new PoseStabilizer({ selectedSide: 'left' }));
+  const forearmEstimatorRef = useRef(new ForearmFrameEstimator());
+  const forearmFrameRef = useRef<ForearmLocalFrame | null>(null);
+  const radiusEstimatorRef = useRef(new ForearmRadiusEstimator());
+  const radiusEstimateRef = useRef<ForearmRadiusEstimate | null>(null);
+  const feasibilityMonitorRef = useRef(new ForearmFeasibilityMonitor());
+  const bodySideRef = useRef<BodySide>('left');
   const isMirroredRef = useRef(true);
   const metricsRef = useRef(new TrackingMetrics());
   const telemetryHistoryRef = useRef(new TelemetryHistory());
@@ -44,12 +64,24 @@ export function ARSessionPage() {
   const lastMetricsUiRef = useRef(0);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
+  const [bodySide, setBodySide] = useState<BodySide>('left');
   const [isMirrored, setIsMirrored] = useState(true);
   const [message, setMessage] = useState(initialError);
   const [trackerMessage, setTrackerMessage] = useState('Tracker idle');
   const [diagnosticsSnapshot, setDiagnosticsSnapshot] =
     useState<TrackingMetricsSnapshot>(initialDiagnosticsSnapshot);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
+  const [feasibilitySnapshot, setFeasibilitySnapshot] = useState(
+    emptyForearmFeasibilitySnapshot,
+  );
+  const [forearmDiagnostics, setForearmDiagnostics] = useState({
+    rollSource: '—',
+    rollConfidence: 0,
+    radiusSource: '—',
+    radiusConfidence: 0,
+    wristRadiusRatio: 0,
+    elbowRadiusRatio: 0,
+  });
   const debug = new URLSearchParams(window.location.search).has('debug');
   const capabilities = getCapabilityReport();
 
@@ -107,15 +139,42 @@ export function ARSessionPage() {
   const switchCamera = useCallback(() => {
     const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
     stabilizerRef.current.reset();
+    forearmEstimatorRef.current.reset();
+    forearmFrameRef.current = null;
+    radiusEstimatorRef.current.reset();
+    radiusEstimateRef.current = null;
+    feasibilityMonitorRef.current.reset();
     metricsRef.current = new TrackingMetrics();
     telemetryHistoryRef.current.clear();
     telemetryRendererRef.current?.draw([]);
     lastMetricsUiRef.current = 0;
     setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setForearmDiagnostics(initialForearmDiagnostics());
+    setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
     setFacingMode(nextFacingMode);
     setMessage('Switching camera…');
     void startCamera(nextFacingMode);
   }, [facingMode, startCamera]);
+
+  const selectBodySide = useCallback((side: BodySide) => {
+    if (bodySideRef.current === side) return;
+    bodySideRef.current = side;
+    stabilizerRef.current.selectSide(side);
+    forearmEstimatorRef.current.reset();
+    forearmFrameRef.current = null;
+    radiusEstimatorRef.current.reset();
+    radiusEstimateRef.current = null;
+    feasibilityMonitorRef.current.reset();
+    metricsRef.current = new TrackingMetrics();
+    telemetryHistoryRef.current.clear();
+    telemetryRendererRef.current?.draw([]);
+    lastMetricsUiRef.current = 0;
+    setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setBodySide(side);
+    setForearmDiagnostics(initialForearmDiagnostics());
+    setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
+    setTrackerMessage(`Acquiring ${side} forearm…`);
+  }, []);
 
   useEffect(() => stopCamera, [stopCamera]);
 
@@ -131,6 +190,7 @@ export function ARSessionPage() {
       );
     trackerRef.current = tracker;
     const renderer = new PoseDebugRenderer(canvas);
+    const forearmGeometry = new ForearmGeometry();
     let stopFrames: () => void = () => {};
     let unsubscribe: () => void = () => {};
     let cancelled = false;
@@ -178,6 +238,28 @@ export function ARSessionPage() {
           const rect = video.getBoundingClientRect();
           syncCanvasSize(canvas, rect.width, rect.height);
           if (stabilized.frame && stabilized.opacity > 0) {
+            if (stabilized.state !== 'trackingLost') {
+              forearmFrameRef.current = forearmEstimatorRef.current.update(
+                stabilized.frame,
+                bodySideRef.current,
+              );
+              if (forearmFrameRef.current) {
+                radiusEstimateRef.current = radiusEstimatorRef.current.update(
+                  stabilized.frame.forearmMaskSamples?.[bodySideRef.current],
+                  forearmFrameRef.current.length,
+                  stabilized.frame.timestampMs,
+                );
+                feasibilityMonitorRef.current.record(
+                  stabilized.frame.timestampMs,
+                  forearmFrameRef.current,
+                  radiusEstimateRef.current,
+                );
+                forearmGeometry.update(
+                  forearmFrameRef.current,
+                  radiusEstimateRef.current.radii,
+                );
+              }
+            }
             const transform = new ViewportTransform({
               source: { width: video.videoWidth, height: video.videoHeight },
               display: { width: rect.width, height: rect.height },
@@ -193,6 +275,31 @@ export function ARSessionPage() {
               },
               stabilized.opacity,
             );
+            if (debug && forearmFrameRef.current) {
+              renderer.drawForearmWireframe(
+                stabilized.frame,
+                bodySideRef.current,
+                forearmFrameRef.current,
+                forearmGeometry,
+                transform,
+                {
+                  width: video.videoWidth,
+                  height: video.videoHeight,
+                },
+                stabilized.opacity,
+              );
+              renderer.drawForearmFrame(
+                stabilized.frame,
+                bodySideRef.current,
+                forearmFrameRef.current,
+                transform,
+                {
+                  width: video.videoWidth,
+                  height: video.videoHeight,
+                },
+                stabilized.opacity,
+              );
+            }
           } else {
             renderer.clear();
           }
@@ -201,6 +308,19 @@ export function ARSessionPage() {
           if (nowMs - lastMetricsUiRef.current >= 1000) {
             lastMetricsUiRef.current = nowMs;
             setDiagnosticsSnapshot(metrics);
+            setForearmDiagnostics({
+              rollSource: forearmFrameRef.current?.orientationSource ?? '—',
+              rollConfidence: forearmFrameRef.current?.rollConfidence ?? 0,
+              radiusSource: radiusEstimateRef.current?.source ?? '—',
+              radiusConfidence: radiusEstimateRef.current?.confidence ?? 0,
+              wristRadiusRatio:
+                radiusEstimateRef.current?.wristRadiusRatio ?? 0,
+              elbowRadiusRatio:
+                radiusEstimateRef.current?.elbowRadiusRatio ?? 0,
+            });
+            setFeasibilitySnapshot(
+              feasibilityMonitorRef.current.snapshot(nowMs),
+            );
             telemetryHistoryRef.current.push(nowMs, metrics);
             const telemetryCanvas = telemetryCanvasRef.current;
             if (telemetryCanvas) {
@@ -233,9 +353,10 @@ export function ARSessionPage() {
       stopFrames();
       unsubscribe();
       renderer.clear();
+      forearmGeometry.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [session]);
+  }, [debug, session]);
 
   useEffect(
     () => () => {
@@ -337,12 +458,26 @@ export function ARSessionPage() {
       </section>
 
       <section className="control-panel" aria-label="Camera controls">
-        <p className="eyebrow">Phase 2 · temporal tracking lab</p>
+        <p className="eyebrow">Phase 3 · forearm surface lab</p>
         <h1>Ink, held in place.</h1>
         <p className="lede">
-          A privacy-first live preview. Pose smoothing and confidence recovery
-          run entirely on this device.
+          A privacy-first live preview. The tapered surface, stable seam, and
+          roll evidence run entirely on this device.
         </p>
+        <fieldset className="arm-selector">
+          <legend>Target forearm</legend>
+          {(['left', 'right'] as const).map((side) => (
+            <button
+              key={side}
+              type="button"
+              aria-pressed={bodySide === side}
+              onClick={() => selectBodySide(side)}
+            >
+              <span>{side === 'left' ? 'L' : 'R'}</span>
+              {side}
+            </button>
+          ))}
+        </fieldset>
         <div className="controls">
           <button
             className="primary"
@@ -394,6 +529,58 @@ export function ARSessionPage() {
                 <small>DROPS</small>
                 <b>{diagnosticsSnapshot.droppedFrames}</b>
               </span>
+              <span>
+                <small>ROLL SOURCE</small>
+                <b>{forearmDiagnostics.rollSource}</b>
+              </span>
+              <span>
+                <small>ROLL CONF</small>
+                <b>{Math.round(forearmDiagnostics.rollConfidence * 100)}%</b>
+              </span>
+              <span>
+                <small>RADIUS SOURCE</small>
+                <b>{forearmDiagnostics.radiusSource}</b>
+              </span>
+              <span>
+                <small>RADIUS CONF</small>
+                <b>{Math.round(forearmDiagnostics.radiusConfidence * 100)}%</b>
+              </span>
+              <span>
+                <small>RADIUS W / E</small>
+                <b>
+                  {Math.round(forearmDiagnostics.wristRadiusRatio * 1000) / 10}
+                  {' / '}
+                  {Math.round(forearmDiagnostics.elbowRadiusRatio * 1000) / 10}%
+                </b>
+              </span>
+              <span>
+                <small>ROLL / RANGE</small>
+                <b>
+                  {signedDegrees(feasibilitySnapshot.currentRollDegrees)} /{' '}
+                  {Math.round(feasibilitySnapshot.rollRangeDegrees)}°
+                </b>
+              </span>
+              <span>
+                <small>MAX ROLL STEP</small>
+                <b>{feasibilitySnapshot.maximumRollStepDegrees.toFixed(1)}°</b>
+              </span>
+              <span>
+                <small>180° FLIPS</small>
+                <b>{feasibilitySnapshot.flipCount}</b>
+              </span>
+              <span>
+                <small>5S RADIUS Δ W / E</small>
+                <b>
+                  {feasibilitySnapshot.wristRadiusDriftPercent.toFixed(1)} /{' '}
+                  {feasibilitySnapshot.elbowRadiusDriftPercent.toFixed(1)}%
+                </b>
+              </span>
+              <span>
+                <small>STABILITY WINDOW</small>
+                <b>
+                  {(feasibilitySnapshot.radiusWindowMs / 1_000).toFixed(1)} / 5s
+                </b>
+              </span>
             </div>
             <canvas
               ref={telemetryCanvasRef}
@@ -424,4 +611,20 @@ export function ARSessionPage() {
       </section>
     </main>
   );
+}
+
+function initialForearmDiagnostics() {
+  return {
+    rollSource: '—',
+    rollConfidence: 0,
+    radiusSource: '—',
+    radiusConfidence: 0,
+    wristRadiusRatio: 0,
+    elbowRadiusRatio: 0,
+  };
+}
+
+function signedDegrees(value: number): string {
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? '+' : ''}${rounded}°`;
 }

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:https": "vite --mode https",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
@@ -30,6 +31,8 @@
     "@types/node": "~24.13.3",
     "@types/react": "~19.2.18",
     "@types/react-dom": "~19.2.4",
+    "@types/three": "^0.185.4",
+    "@vitejs/plugin-basic-ssl": "~2.3.0",
     "@vitejs/plugin-react-swc": "~4.3.3",
     "browserslist": "~4.28.8",
     "browserslist-to-esbuild": "~2.1.1",
@@ -38,6 +41,6 @@
     "prettier": "~3.9.6",
     "typescript": "~6.0.2",
     "vite": "~8.2.2",
-    "vitest": "~4.0.18"
+    "vitest": "^4.1.11"
   }
 }
