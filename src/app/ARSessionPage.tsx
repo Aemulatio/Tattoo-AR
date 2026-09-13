@@ -6,28 +6,49 @@ import { syncCanvasSize } from '../ar-engine/rendering/syncCanvasSize';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
 import { WorkerPoseTracker } from '../ar-engine/tracking/WorkerPoseTracker';
 import { FallbackPoseTracker } from '../ar-engine/tracking/FallbackPoseTracker';
-import { TrackingMetrics } from '../ar-engine/diagnostics/TrackingMetrics';
+import { PoseStabilizer } from '../ar-engine/tracking/PoseStabilizer';
+import { TelemetryGraphRenderer } from '../ar-engine/diagnostics/TelemetryGraphRenderer';
+import { TelemetryHistory } from '../ar-engine/diagnostics/TelemetryHistory';
+import {
+  TrackingMetrics,
+  type TrackingMetricsSnapshot,
+} from '../ar-engine/diagnostics/TrackingMetrics';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
 
 const initialError =
   'Camera access is requested only after you choose Start camera.';
+const initialDiagnosticsSnapshot: TrackingMetricsSnapshot = {
+  inferenceMs: 0,
+  resultsPerSecond: 0,
+  rendersPerSecond: 0,
+  droppedFrames: 0,
+  confidence: 0,
+  poseAgeMs: 0,
+  trackingState: 'acquiring',
+};
 
 export function ARSessionPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
+  const telemetryCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackerRef = useRef<FallbackPoseTracker | null>(null);
+  const stabilizerRef = useRef(new PoseStabilizer());
   const isMirroredRef = useRef(true);
   const metricsRef = useRef(new TrackingMetrics());
+  const telemetryHistoryRef = useRef(new TelemetryHistory());
+  const telemetryRendererRef = useRef<TelemetryGraphRenderer | null>(null);
   const lastMetricsUiRef = useRef(0);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [isMirrored, setIsMirrored] = useState(true);
   const [message, setMessage] = useState(initialError);
   const [trackerMessage, setTrackerMessage] = useState('Tracker idle');
+  const [diagnosticsSnapshot, setDiagnosticsSnapshot] =
+    useState<TrackingMetricsSnapshot>(initialDiagnosticsSnapshot);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
   const debug = new URLSearchParams(window.location.search).has('debug');
   const capabilities = getCapabilityReport();
@@ -85,6 +106,12 @@ export function ARSessionPage() {
 
   const switchCamera = useCallback(() => {
     const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    stabilizerRef.current.reset();
+    metricsRef.current = new TrackingMetrics();
+    telemetryHistoryRef.current.clear();
+    telemetryRendererRef.current?.draw([]);
+    lastMetricsUiRef.current = 0;
+    setDiagnosticsSnapshot(metricsRef.current.snapshot());
     setFacingMode(nextFacingMode);
     setMessage('Switching camera…');
     void startCamera(nextFacingMode);
@@ -140,25 +167,55 @@ export function ARSessionPage() {
             : 'main-thread fallback';
         setTrackerMessage(`Pose tracker active (${trackerMode})`);
         unsubscribe = tracker.subscribe((frame) => {
-          const metrics = metricsRef.current.recordResult(frame);
-          if (frame.timestampMs - lastMetricsUiRef.current >= 1000) {
-            lastMetricsUiRef.current = frame.timestampMs;
-            setTrackerMessage(
-              `Pose tracker active (${trackerMode}) · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms · ${metrics.droppedFrames} drops`,
-            );
-          }
+          const nowMs = performance.now();
+          const stabilized = stabilizerRef.current.process(frame, nowMs);
+          metricsRef.current.recordResult(frame, nowMs);
+          metricsRef.current.recordTracking(
+            stabilized.confidence.value,
+            stabilized.confidence.poseAgeMs,
+            stabilized.state,
+          );
           const rect = video.getBoundingClientRect();
           syncCanvasSize(canvas, rect.width, rect.height);
-          const transform = new ViewportTransform({
-            source: { width: video.videoWidth, height: video.videoHeight },
-            display: { width: rect.width, height: rect.height },
-            fit: 'cover',
-            mirrored: isMirroredRef.current,
-          });
-          renderer.draw(frame, transform, {
-            width: video.videoWidth,
-            height: video.videoHeight,
-          });
+          if (stabilized.frame && stabilized.opacity > 0) {
+            const transform = new ViewportTransform({
+              source: { width: video.videoWidth, height: video.videoHeight },
+              display: { width: rect.width, height: rect.height },
+              fit: 'cover',
+              mirrored: isMirroredRef.current,
+            });
+            renderer.draw(
+              stabilized.frame,
+              transform,
+              {
+                width: video.videoWidth,
+                height: video.videoHeight,
+              },
+              stabilized.opacity,
+            );
+          } else {
+            renderer.clear();
+          }
+          metricsRef.current.recordRender(nowMs);
+          const metrics = metricsRef.current.snapshot();
+          if (nowMs - lastMetricsUiRef.current >= 1000) {
+            lastMetricsUiRef.current = nowMs;
+            setDiagnosticsSnapshot(metrics);
+            telemetryHistoryRef.current.push(nowMs, metrics);
+            const telemetryCanvas = telemetryCanvasRef.current;
+            if (telemetryCanvas) {
+              telemetryRendererRef.current ??= new TelemetryGraphRenderer(
+                telemetryCanvas,
+              );
+              telemetryRendererRef.current.draw(
+                telemetryHistoryRef.current.samples(),
+              );
+            }
+            const side = stabilized.confidence.side ?? 'no arm';
+            setTrackerMessage(
+              `${stabilized.state} · ${side} · ${Math.round(metrics.confidence * 100)}% · ${metrics.resultsPerSecond.toFixed(1)} FPS · ${metrics.inferenceMs.toFixed(0)} ms · ${trackerMode}`,
+            );
+          }
         });
         startScheduling();
       })
@@ -280,11 +337,11 @@ export function ARSessionPage() {
       </section>
 
       <section className="control-panel" aria-label="Camera controls">
-        <p className="eyebrow">Phase 0 · capability shell</p>
+        <p className="eyebrow">Phase 2 · temporal tracking lab</p>
         <h1>Ink, held in place.</h1>
         <p className="lede">
-          A privacy-first live preview. Video stays on this device; tracking and
-          tattoo placement arrive in subsequent phases.
+          A privacy-first live preview. Pose smoothing and confidence recovery
+          run entirely on this device.
         </p>
         <div className="controls">
           <button
@@ -318,6 +375,32 @@ export function ARSessionPage() {
         {debug && (
           <details className="diagnostics" open>
             <summary>Development diagnostics</summary>
+            <div className="telemetry-readout">
+              <span>
+                <small>STATE</small>
+                <b data-state={diagnosticsSnapshot.trackingState}>
+                  {diagnosticsSnapshot.trackingState}
+                </b>
+              </span>
+              <span>
+                <small>CONF</small>
+                <b>{Math.round(diagnosticsSnapshot.confidence * 100)}%</b>
+              </span>
+              <span>
+                <small>POSE AGE</small>
+                <b>{diagnosticsSnapshot.poseAgeMs.toFixed(0)} ms</b>
+              </span>
+              <span>
+                <small>DROPS</small>
+                <b>{diagnosticsSnapshot.droppedFrames}</b>
+              </span>
+            </div>
+            <canvas
+              ref={telemetryCanvasRef}
+              className="telemetry-graph"
+              role="img"
+              aria-label="Live graphs for inference time, tracking rate, render rate, and pose confidence"
+            />
             <p>
               Source: {dimensions.source}
               <br />
