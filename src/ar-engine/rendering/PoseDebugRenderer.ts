@@ -18,11 +18,13 @@ export class PoseDebugRenderer {
     frame: PoseFrame,
     transform: ViewportTransform,
     source: { width: number; height: number },
+    opacity = 1,
   ): void {
     const context = this.canvas.getContext('2d');
     if (!context) return;
     context.clearRect(0, 0, this.canvas.width, this.canvas.height);
     context.save();
+    context.globalAlpha = Math.min(1, Math.max(0, opacity));
     context.strokeStyle = '#e1ff48';
     context.fillStyle = '#0d1608';
     context.lineWidth = 4;
