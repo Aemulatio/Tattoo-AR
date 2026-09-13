@@ -18,6 +18,10 @@ import {
   ForearmFrameEstimator,
   type ForearmLocalFrame,
 } from '../ar-engine/surfaces/forearm/ForearmFrameEstimator';
+import {
+  anatomicalFallbackRadii,
+  ForearmGeometry,
+} from '../ar-engine/surfaces/forearm/ForearmGeometry';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -162,6 +166,7 @@ export function ARSessionPage() {
       );
     trackerRef.current = tracker;
     const renderer = new PoseDebugRenderer(canvas);
+    const forearmGeometry = new ForearmGeometry();
     let stopFrames: () => void = () => {};
     let unsubscribe: () => void = () => {};
     let cancelled = false;
@@ -214,6 +219,12 @@ export function ARSessionPage() {
                 stabilized.frame,
                 bodySideRef.current,
               );
+              if (forearmFrameRef.current) {
+                forearmGeometry.update(
+                  forearmFrameRef.current,
+                  anatomicalFallbackRadii(forearmFrameRef.current.length),
+                );
+              }
             }
             const transform = new ViewportTransform({
               source: { width: video.videoWidth, height: video.videoHeight },
@@ -231,6 +242,18 @@ export function ARSessionPage() {
               stabilized.opacity,
             );
             if (debug && forearmFrameRef.current) {
+              renderer.drawForearmWireframe(
+                stabilized.frame,
+                bodySideRef.current,
+                forearmFrameRef.current,
+                forearmGeometry,
+                transform,
+                {
+                  width: video.videoWidth,
+                  height: video.videoHeight,
+                },
+                stabilized.opacity,
+              );
               renderer.drawForearmFrame(
                 stabilized.frame,
                 bodySideRef.current,
@@ -287,6 +310,7 @@ export function ARSessionPage() {
       stopFrames();
       unsubscribe();
       renderer.clear();
+      forearmGeometry.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [debug, session]);
@@ -391,11 +415,11 @@ export function ARSessionPage() {
       </section>
 
       <section className="control-panel" aria-label="Camera controls">
-        <p className="eyebrow">Phase 2 · temporal tracking lab</p>
+        <p className="eyebrow">Phase 3 · forearm surface lab</p>
         <h1>Ink, held in place.</h1>
         <p className="lede">
-          A privacy-first live preview. Pose smoothing and confidence recovery
-          run entirely on this device.
+          A privacy-first live preview. The tapered surface, stable seam, and
+          roll evidence run entirely on this device.
         </p>
         <fieldset className="arm-selector">
           <legend>Target forearm</legend>
@@ -469,6 +493,10 @@ export function ARSessionPage() {
               <span>
                 <small>ROLL CONF</small>
                 <b>{Math.round(forearmDiagnostics.confidence * 100)}%</b>
+              </span>
+              <span>
+                <small>RADIUS</small>
+                <b>anatomical</b>
               </span>
             </div>
             <canvas

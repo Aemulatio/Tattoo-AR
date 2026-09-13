@@ -1,5 +1,6 @@
 import type { BodySide, PoseFrame } from '../contracts';
 import type { ForearmLocalFrame } from '../surfaces/forearm/ForearmFrameEstimator';
+import type { ForearmGeometry } from '../surfaces/forearm/ForearmGeometry';
 import {
   PoseLandmark,
   upperBodyConnections,
@@ -127,6 +128,138 @@ export class PoseDebugRenderer {
     );
     context.restore();
   }
+
+  drawForearmWireframe(
+    frame: PoseFrame,
+    side: BodySide,
+    localFrame: ForearmLocalFrame,
+    mesh: ForearmGeometry,
+    transform: ViewportTransform,
+    source: { width: number; height: number },
+    opacity = 1,
+  ): void {
+    const context = this.canvas.getContext('2d');
+    const indices = forearmLandmarks(side);
+    const wrist = frame.landmarks[indices.wrist];
+    const elbow = frame.landmarks[indices.elbow];
+    if (!context || !wrist || !elbow) return;
+
+    const position = mesh.geometry.getAttribute('position');
+    const ringSize = mesh.radialSegments + 1;
+    const sourceWrist = {
+      x: wrist.image.x * source.width,
+      y: wrist.image.y * source.height,
+    };
+    const sourceElbow = {
+      x: elbow.image.x * source.width,
+      y: elbow.image.y * source.height,
+    };
+    const pixelsPerWorldUnit =
+      Math.hypot(sourceElbow.x - sourceWrist.x, sourceElbow.y - sourceWrist.y) /
+      localFrame.length;
+
+    const projectVertex = (vertexIndex: number) => {
+      const relative = {
+        x: position.getX(vertexIndex) - localFrame.origin.x,
+        y: position.getY(vertexIndex) - localFrame.origin.y,
+        z: position.getZ(vertexIndex) - localFrame.origin.z,
+      };
+      const longitudinal =
+        (relative.x * localFrame.axis.x +
+          relative.y * localFrame.axis.y +
+          relative.z * localFrame.axis.z) /
+        localFrame.length;
+      const radial =
+        relative.x * localFrame.radial.x +
+        relative.y * localFrame.radial.y +
+        relative.z * localFrame.radial.z;
+      const tangent =
+        relative.x * localFrame.tangent.x +
+        relative.y * localFrame.tangent.y +
+        relative.z * localFrame.tangent.z;
+      const crossX =
+        localFrame.radial.x * radial + localFrame.tangent.x * tangent;
+      const crossY =
+        localFrame.radial.y * radial + localFrame.tangent.y * tangent;
+
+      return transform.sourceToDisplay({
+        x:
+          sourceWrist.x +
+          (sourceElbow.x - sourceWrist.x) * longitudinal +
+          crossX * pixelsPerWorldUnit,
+        y:
+          sourceWrist.y +
+          (sourceElbow.y - sourceWrist.y) * longitudinal +
+          crossY * pixelsPerWorldUnit,
+      });
+    };
+
+    context.save();
+    context.globalAlpha = Math.min(1, Math.max(0, opacity)) * 0.72;
+    context.strokeStyle = '#7ed7ff';
+    context.lineWidth = 1;
+
+    for (
+      let longitudinalIndex = 0;
+      longitudinalIndex <= mesh.longitudinalSegments;
+      longitudinalIndex += 1
+    ) {
+      context.beginPath();
+      for (
+        let radialIndex = 0;
+        radialIndex <= mesh.radialSegments;
+        radialIndex += 1
+      ) {
+        const point = projectVertex(longitudinalIndex * ringSize + radialIndex);
+        if (radialIndex === 0) context.moveTo(point.x, point.y);
+        else context.lineTo(point.x, point.y);
+      }
+      context.stroke();
+    }
+
+    for (
+      let radialIndex = 0;
+      radialIndex < mesh.radialSegments;
+      radialIndex += 3
+    ) {
+      context.beginPath();
+      for (
+        let longitudinalIndex = 0;
+        longitudinalIndex <= mesh.longitudinalSegments;
+        longitudinalIndex += 1
+      ) {
+        const point = projectVertex(longitudinalIndex * ringSize + radialIndex);
+        if (longitudinalIndex === 0) context.moveTo(point.x, point.y);
+        else context.lineTo(point.x, point.y);
+      }
+      context.stroke();
+    }
+
+    context.globalAlpha = Math.min(1, Math.max(0, opacity));
+    context.strokeStyle = '#ff7da9';
+    context.lineWidth = 3;
+    context.beginPath();
+    for (
+      let longitudinalIndex = 0;
+      longitudinalIndex <= mesh.longitudinalSegments;
+      longitudinalIndex += 1
+    ) {
+      const point = projectVertex(longitudinalIndex * ringSize);
+      if (longitudinalIndex === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    }
+    context.stroke();
+    context.restore();
+  }
+}
+
+function forearmLandmarks(side: BodySide): {
+  wrist: number;
+  elbow: number;
+} {
+  return side === 'left'
+    ? { wrist: PoseLandmark.leftWrist, elbow: PoseLandmark.leftElbow }
+    : { wrist: PoseLandmark.rightWrist, elbow: PoseLandmark.rightElbow };
 }
 
 function drawAxis(
