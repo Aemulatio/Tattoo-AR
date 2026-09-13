@@ -18,6 +18,7 @@ export interface ForearmLocalFrame {
   radial: Vec3;
   tangent: Vec3;
   length: number;
+  rollRadians: number;
   rollConfidence: number;
   orientationSource: ForearmOrientationSource;
 }
@@ -56,8 +57,11 @@ export class ForearmFrameEstimator {
     const orientation =
       handOrientation ?? transported ?? this.neutralOrientation(axis);
     let radial = orientation.radial;
+    const transportedPrevious = this.previousFrame
+      ? normalize(projectOnPlane(this.previousFrame.radial, axis))
+      : null;
 
-    if (this.previousFrame && dot(radial, this.previousFrame.radial) < 0) {
+    if (transportedPrevious && dot(radial, transportedPrevious) < 0) {
       radial = negate(radial);
     }
 
@@ -72,6 +76,11 @@ export class ForearmFrameEstimator {
       radial: orthogonalRadial,
       tangent,
       length,
+      rollRadians:
+        this.previousFrame && transportedPrevious
+          ? this.previousFrame.rollRadians +
+            signedAngle(transportedPrevious, orthogonalRadial, axis)
+          : 0,
       rollConfidence: orientation.confidence,
       orientationSource: orientation.source,
     };
@@ -132,6 +141,10 @@ export class ForearmFrameEstimator {
       screenRight;
     return { radial, confidence: 0.15, source: 'neutral' };
   }
+}
+
+function signedAngle(from: Vec3, to: Vec3, axis: Vec3): number {
+  return Math.atan2(dot(axis, cross(from, to)), dot(from, to));
 }
 
 interface OrientationCandidate {

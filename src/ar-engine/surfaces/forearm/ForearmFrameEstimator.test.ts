@@ -43,6 +43,7 @@ describe('ForearmFrameEstimator', () => {
       expect(current.orientationSource).toBe('hand');
       previous = current;
     }
+    expect(Math.abs(previous.rollRadians)).toBeCloseTo(Math.PI / 2);
   });
 
   it('transports the previous frame when hand landmarks disappear', () => {
@@ -52,6 +53,7 @@ describe('ForearmFrameEstimator', () => {
 
     expect(lostHand.orientationSource).toBe('transported');
     expect(dot(handFrame.radial, lostHand.radial)).toBeGreaterThan(0.99);
+    expect(lostHand.rollRadians).toBeCloseTo(handFrame.rollRadians);
     expect(lostHand.rollConfidence).toBeLessThan(handFrame.rollConfidence);
   });
 

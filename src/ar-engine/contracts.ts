@@ -14,11 +14,18 @@ export interface PosePoint {
   visibility: number;
 }
 
+export interface ForearmMaskSample {
+  wristRadiusRatio: number;
+  elbowRadiusRatio: number;
+  confidence: number;
+}
+
 export interface PoseFrame {
   frameId: number;
   timestampMs: number;
   landmarks: ReadonlyArray<PosePoint>;
   inferenceMs: number;
+  forearmMaskSamples?: Partial<Record<BodySide, ForearmMaskSample>>;
 }
 
 export interface TrackerConfig {

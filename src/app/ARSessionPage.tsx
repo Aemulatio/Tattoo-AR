@@ -13,15 +13,20 @@ import {
   TrackingMetrics,
   type TrackingMetricsSnapshot,
 } from '../ar-engine/diagnostics/TrackingMetrics';
+import {
+  emptyForearmFeasibilitySnapshot,
+  ForearmFeasibilityMonitor,
+} from '../ar-engine/diagnostics/ForearmFeasibilityMonitor';
 import type { BodySide } from '../ar-engine/contracts';
 import {
   ForearmFrameEstimator,
   type ForearmLocalFrame,
 } from '../ar-engine/surfaces/forearm/ForearmFrameEstimator';
+import { ForearmGeometry } from '../ar-engine/surfaces/forearm/ForearmGeometry';
 import {
-  anatomicalFallbackRadii,
-  ForearmGeometry,
-} from '../ar-engine/surfaces/forearm/ForearmGeometry';
+  ForearmRadiusEstimator,
+  type ForearmRadiusEstimate,
+} from '../ar-engine/surfaces/forearm/ForearmRadiusEstimator';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -48,6 +53,9 @@ export function ARSessionPage() {
   const stabilizerRef = useRef(new PoseStabilizer({ selectedSide: 'left' }));
   const forearmEstimatorRef = useRef(new ForearmFrameEstimator());
   const forearmFrameRef = useRef<ForearmLocalFrame | null>(null);
+  const radiusEstimatorRef = useRef(new ForearmRadiusEstimator());
+  const radiusEstimateRef = useRef<ForearmRadiusEstimate | null>(null);
+  const feasibilityMonitorRef = useRef(new ForearmFeasibilityMonitor());
   const bodySideRef = useRef<BodySide>('left');
   const isMirroredRef = useRef(true);
   const metricsRef = useRef(new TrackingMetrics());
@@ -63,9 +71,16 @@ export function ARSessionPage() {
   const [diagnosticsSnapshot, setDiagnosticsSnapshot] =
     useState<TrackingMetricsSnapshot>(initialDiagnosticsSnapshot);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
+  const [feasibilitySnapshot, setFeasibilitySnapshot] = useState(
+    emptyForearmFeasibilitySnapshot,
+  );
   const [forearmDiagnostics, setForearmDiagnostics] = useState({
-    source: '—',
-    confidence: 0,
+    rollSource: '—',
+    rollConfidence: 0,
+    radiusSource: '—',
+    radiusConfidence: 0,
+    wristRadiusRatio: 0,
+    elbowRadiusRatio: 0,
   });
   const debug = new URLSearchParams(window.location.search).has('debug');
   const capabilities = getCapabilityReport();
@@ -126,11 +141,16 @@ export function ARSessionPage() {
     stabilizerRef.current.reset();
     forearmEstimatorRef.current.reset();
     forearmFrameRef.current = null;
+    radiusEstimatorRef.current.reset();
+    radiusEstimateRef.current = null;
+    feasibilityMonitorRef.current.reset();
     metricsRef.current = new TrackingMetrics();
     telemetryHistoryRef.current.clear();
     telemetryRendererRef.current?.draw([]);
     lastMetricsUiRef.current = 0;
     setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setForearmDiagnostics(initialForearmDiagnostics());
+    setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
     setFacingMode(nextFacingMode);
     setMessage('Switching camera…');
     void startCamera(nextFacingMode);
@@ -142,13 +162,17 @@ export function ARSessionPage() {
     stabilizerRef.current.selectSide(side);
     forearmEstimatorRef.current.reset();
     forearmFrameRef.current = null;
+    radiusEstimatorRef.current.reset();
+    radiusEstimateRef.current = null;
+    feasibilityMonitorRef.current.reset();
     metricsRef.current = new TrackingMetrics();
     telemetryHistoryRef.current.clear();
     telemetryRendererRef.current?.draw([]);
     lastMetricsUiRef.current = 0;
     setDiagnosticsSnapshot(metricsRef.current.snapshot());
     setBodySide(side);
-    setForearmDiagnostics({ source: '—', confidence: 0 });
+    setForearmDiagnostics(initialForearmDiagnostics());
+    setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
     setTrackerMessage(`Acquiring ${side} forearm…`);
   }, []);
 
@@ -220,9 +244,19 @@ export function ARSessionPage() {
                 bodySideRef.current,
               );
               if (forearmFrameRef.current) {
+                radiusEstimateRef.current = radiusEstimatorRef.current.update(
+                  stabilized.frame.forearmMaskSamples?.[bodySideRef.current],
+                  forearmFrameRef.current.length,
+                  stabilized.frame.timestampMs,
+                );
+                feasibilityMonitorRef.current.record(
+                  stabilized.frame.timestampMs,
+                  forearmFrameRef.current,
+                  radiusEstimateRef.current,
+                );
                 forearmGeometry.update(
                   forearmFrameRef.current,
-                  anatomicalFallbackRadii(forearmFrameRef.current.length),
+                  radiusEstimateRef.current.radii,
                 );
               }
             }
@@ -275,9 +309,18 @@ export function ARSessionPage() {
             lastMetricsUiRef.current = nowMs;
             setDiagnosticsSnapshot(metrics);
             setForearmDiagnostics({
-              source: forearmFrameRef.current?.orientationSource ?? '—',
-              confidence: forearmFrameRef.current?.rollConfidence ?? 0,
+              rollSource: forearmFrameRef.current?.orientationSource ?? '—',
+              rollConfidence: forearmFrameRef.current?.rollConfidence ?? 0,
+              radiusSource: radiusEstimateRef.current?.source ?? '—',
+              radiusConfidence: radiusEstimateRef.current?.confidence ?? 0,
+              wristRadiusRatio:
+                radiusEstimateRef.current?.wristRadiusRatio ?? 0,
+              elbowRadiusRatio:
+                radiusEstimateRef.current?.elbowRadiusRatio ?? 0,
             });
+            setFeasibilitySnapshot(
+              feasibilityMonitorRef.current.snapshot(nowMs),
+            );
             telemetryHistoryRef.current.push(nowMs, metrics);
             const telemetryCanvas = telemetryCanvasRef.current;
             if (telemetryCanvas) {
@@ -488,15 +531,55 @@ export function ARSessionPage() {
               </span>
               <span>
                 <small>ROLL SOURCE</small>
-                <b>{forearmDiagnostics.source}</b>
+                <b>{forearmDiagnostics.rollSource}</b>
               </span>
               <span>
                 <small>ROLL CONF</small>
-                <b>{Math.round(forearmDiagnostics.confidence * 100)}%</b>
+                <b>{Math.round(forearmDiagnostics.rollConfidence * 100)}%</b>
               </span>
               <span>
-                <small>RADIUS</small>
-                <b>anatomical</b>
+                <small>RADIUS SOURCE</small>
+                <b>{forearmDiagnostics.radiusSource}</b>
+              </span>
+              <span>
+                <small>RADIUS CONF</small>
+                <b>{Math.round(forearmDiagnostics.radiusConfidence * 100)}%</b>
+              </span>
+              <span>
+                <small>RADIUS W / E</small>
+                <b>
+                  {Math.round(forearmDiagnostics.wristRadiusRatio * 1000) / 10}
+                  {' / '}
+                  {Math.round(forearmDiagnostics.elbowRadiusRatio * 1000) / 10}%
+                </b>
+              </span>
+              <span>
+                <small>ROLL / RANGE</small>
+                <b>
+                  {signedDegrees(feasibilitySnapshot.currentRollDegrees)} /{' '}
+                  {Math.round(feasibilitySnapshot.rollRangeDegrees)}°
+                </b>
+              </span>
+              <span>
+                <small>MAX ROLL STEP</small>
+                <b>{feasibilitySnapshot.maximumRollStepDegrees.toFixed(1)}°</b>
+              </span>
+              <span>
+                <small>180° FLIPS</small>
+                <b>{feasibilitySnapshot.flipCount}</b>
+              </span>
+              <span>
+                <small>5S RADIUS Δ W / E</small>
+                <b>
+                  {feasibilitySnapshot.wristRadiusDriftPercent.toFixed(1)} /{' '}
+                  {feasibilitySnapshot.elbowRadiusDriftPercent.toFixed(1)}%
+                </b>
+              </span>
+              <span>
+                <small>STABILITY WINDOW</small>
+                <b>
+                  {(feasibilitySnapshot.radiusWindowMs / 1_000).toFixed(1)} / 5s
+                </b>
               </span>
             </div>
             <canvas
@@ -528,4 +611,20 @@ export function ARSessionPage() {
       </section>
     </main>
   );
+}
+
+function initialForearmDiagnostics() {
+  return {
+    rollSource: '—',
+    rollConfidence: 0,
+    radiusSource: '—',
+    radiusConfidence: 0,
+    wristRadiusRatio: 0,
+    elbowRadiusRatio: 0,
+  };
+}
+
+function signedDegrees(value: number): string {
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? '+' : ''}${rounded}°`;
 }

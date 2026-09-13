@@ -122,7 +122,7 @@ export class PoseDebugRenderer {
     context.fillStyle = '#f2efe7';
     context.font = '9px "DM Mono", monospace';
     context.fillText(
-      `${localFrame.orientationSource} ${Math.round(localFrame.rollConfidence * 100)}%`,
+      `${localFrame.orientationSource} ${Math.round(localFrame.rollConfidence * 100)}% · roll ${Math.round((localFrame.rollRadians * 180) / Math.PI)}°`,
       center.x + 9,
       center.y - 10,
     );

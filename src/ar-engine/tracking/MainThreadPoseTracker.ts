@@ -1,10 +1,6 @@
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
-import type {
-  PoseFrame,
-  PosePoint,
-  PoseTracker,
-  TrackerConfig,
-} from '../contracts';
+import type { PoseFrame, PoseTracker, TrackerConfig } from '../contracts';
+import { poseFrameFromResult } from './PoseResultMapper';
 
 export class MainThreadPoseTracker implements PoseTracker {
   private detector: PoseLandmarker | null = null;
@@ -21,7 +17,7 @@ export class MainThreadPoseTracker implements PoseTracker {
       minPoseDetectionConfidence: 0.55,
       minPosePresenceConfidence: 0.55,
       minTrackingConfidence: 0.5,
-      outputSegmentationMasks: false,
+      outputSegmentationMasks: true,
     });
   }
 
@@ -33,25 +29,11 @@ export class MainThreadPoseTracker implements PoseTracker {
     }
     const start = performance.now();
     try {
-      const result = detector.detectForVideo(bitmap, timestampMs);
-      const image = result.landmarks[0] ?? [];
-      const world = result.worldLandmarks[0] ?? [];
-      const landmarks: PosePoint[] = image.map((point, index) => ({
-        image: { x: point.x, y: point.y, z: point.z },
-        world: {
-          x: world[index]?.x ?? 0,
-          y: world[index]?.y ?? 0,
-          z: world[index]?.z ?? 0,
-        },
-        visibility: point.visibility ?? 0,
-      }));
-      const frame: PoseFrame = {
-        frameId: ++this.frameId,
-        timestampMs,
-        landmarks,
-        inferenceMs: performance.now() - start,
-      };
-      this.listeners.forEach((listener) => listener(frame));
+      detector.detectForVideo(bitmap, timestampMs, (result) => {
+        const frame = poseFrameFromResult(result, ++this.frameId, timestampMs);
+        frame.inferenceMs = performance.now() - start;
+        this.listeners.forEach((listener) => listener(frame));
+      });
     } finally {
       bitmap.close();
     }

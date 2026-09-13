@@ -12,6 +12,7 @@ const frame: ForearmLocalFrame = {
   radial: { x: 1, y: 0, z: 0 },
   tangent: { x: 0, y: 0, z: -1 },
   length: 2,
+  rollRadians: 0,
   rollConfidence: 1,
   orientationSource: 'hand',
 };
