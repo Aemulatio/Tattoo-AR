@@ -1,5 +1,9 @@
-import type { PoseFrame } from '../contracts';
-import { upperBodyConnections } from '../tracking/landmark-indices';
+import type { BodySide, PoseFrame } from '../contracts';
+import type { ForearmLocalFrame } from '../surfaces/forearm/ForearmFrameEstimator';
+import {
+  PoseLandmark,
+  upperBodyConnections,
+} from '../tracking/landmark-indices';
 import { ViewportTransform } from '../camera/ViewportTransform';
 
 export class PoseDebugRenderer {
@@ -58,4 +62,97 @@ export class PoseDebugRenderer {
     }
     context.restore();
   }
+
+  drawForearmFrame(
+    frame: PoseFrame,
+    side: BodySide,
+    localFrame: ForearmLocalFrame,
+    transform: ViewportTransform,
+    source: { width: number; height: number },
+    opacity = 1,
+  ): void {
+    const context = this.canvas.getContext('2d');
+    const indices =
+      side === 'left'
+        ? { wrist: PoseLandmark.leftWrist, elbow: PoseLandmark.leftElbow }
+        : { wrist: PoseLandmark.rightWrist, elbow: PoseLandmark.rightElbow };
+    const wrist = frame.landmarks[indices.wrist];
+    const elbow = frame.landmarks[indices.elbow];
+    if (!context || !wrist || !elbow) return;
+
+    const wristDisplay = transform.sourceToDisplay({
+      x: wrist.image.x * source.width,
+      y: wrist.image.y * source.height,
+    });
+    const elbowDisplay = transform.sourceToDisplay({
+      x: elbow.image.x * source.width,
+      y: elbow.image.y * source.height,
+    });
+    const center = {
+      x: (wristDisplay.x + elbowDisplay.x) / 2,
+      y: (wristDisplay.y + elbowDisplay.y) / 2,
+    };
+    const radial = normalizeScreenAxis(
+      localFrame.radial.x,
+      -localFrame.radial.y,
+      localFrame.tangent.x,
+      -localFrame.tangent.y,
+    );
+    const tangent = { x: -radial.y, y: radial.x };
+
+    context.save();
+    context.globalAlpha = Math.min(1, Math.max(0, opacity));
+    context.lineCap = 'round';
+    drawAxis(context, wristDisplay, elbowDisplay, '#ffb45f', 3);
+    drawAxis(
+      context,
+      center,
+      { x: center.x + radial.x * 34, y: center.y + radial.y * 34 },
+      '#7ed7ff',
+      2,
+    );
+    drawAxis(
+      context,
+      center,
+      { x: center.x + tangent.x * 25, y: center.y + tangent.y * 25 },
+      '#ff7da9',
+      2,
+    );
+    context.fillStyle = '#f2efe7';
+    context.font = '9px "DM Mono", monospace';
+    context.fillText(
+      `${localFrame.orientationSource} ${Math.round(localFrame.rollConfidence * 100)}%`,
+      center.x + 9,
+      center.y - 10,
+    );
+    context.restore();
+  }
+}
+
+function drawAxis(
+  context: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  color: string,
+  width: number,
+): void {
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.beginPath();
+  context.moveTo(from.x, from.y);
+  context.lineTo(to.x, to.y);
+  context.stroke();
+}
+
+function normalizeScreenAxis(
+  x: number,
+  y: number,
+  fallbackX: number,
+  fallbackY: number,
+): { x: number; y: number } {
+  let length = Math.hypot(x, y);
+  if (length > 1e-6) return { x: x / length, y: y / length };
+  length = Math.hypot(fallbackX, fallbackY);
+  if (length > 1e-6) return { x: fallbackX / length, y: fallbackY / length };
+  return { x: 1, y: 0 };
 }

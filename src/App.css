@@ -123,6 +123,54 @@
   font-size: 12px;
   line-height: 1.8;
 }
+.arm-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 22px;
+  padding: 0;
+  border: 0;
+}
+.arm-selector legend {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+  color: #747b70;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.arm-selector button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 10px;
+  border: 1px solid #3d443b;
+  background: #121512;
+  color: #92998d;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.arm-selector button span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid currentColor;
+  font-size: 11px;
+}
+.arm-selector button[aria-pressed='true'] {
+  border-color: #e1ff48;
+  background: rgba(225, 255, 72, 0.08);
+  color: #e1ff48;
+}
 .controls {
   display: grid;
   gap: 10px;

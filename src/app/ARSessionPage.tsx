@@ -13,6 +13,11 @@ import {
   TrackingMetrics,
   type TrackingMetricsSnapshot,
 } from '../ar-engine/diagnostics/TrackingMetrics';
+import type { BodySide } from '../ar-engine/contracts';
+import {
+  ForearmFrameEstimator,
+  type ForearmLocalFrame,
+} from '../ar-engine/surfaces/forearm/ForearmFrameEstimator';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -36,7 +41,10 @@ export function ARSessionPage() {
   const telemetryCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackerRef = useRef<FallbackPoseTracker | null>(null);
-  const stabilizerRef = useRef(new PoseStabilizer());
+  const stabilizerRef = useRef(new PoseStabilizer({ selectedSide: 'left' }));
+  const forearmEstimatorRef = useRef(new ForearmFrameEstimator());
+  const forearmFrameRef = useRef<ForearmLocalFrame | null>(null);
+  const bodySideRef = useRef<BodySide>('left');
   const isMirroredRef = useRef(true);
   const metricsRef = useRef(new TrackingMetrics());
   const telemetryHistoryRef = useRef(new TelemetryHistory());
@@ -44,12 +52,17 @@ export function ARSessionPage() {
   const lastMetricsUiRef = useRef(0);
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
+  const [bodySide, setBodySide] = useState<BodySide>('left');
   const [isMirrored, setIsMirrored] = useState(true);
   const [message, setMessage] = useState(initialError);
   const [trackerMessage, setTrackerMessage] = useState('Tracker idle');
   const [diagnosticsSnapshot, setDiagnosticsSnapshot] =
     useState<TrackingMetricsSnapshot>(initialDiagnosticsSnapshot);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
+  const [forearmDiagnostics, setForearmDiagnostics] = useState({
+    source: '—',
+    confidence: 0,
+  });
   const debug = new URLSearchParams(window.location.search).has('debug');
   const capabilities = getCapabilityReport();
 
@@ -107,6 +120,8 @@ export function ARSessionPage() {
   const switchCamera = useCallback(() => {
     const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
     stabilizerRef.current.reset();
+    forearmEstimatorRef.current.reset();
+    forearmFrameRef.current = null;
     metricsRef.current = new TrackingMetrics();
     telemetryHistoryRef.current.clear();
     telemetryRendererRef.current?.draw([]);
@@ -116,6 +131,22 @@ export function ARSessionPage() {
     setMessage('Switching camera…');
     void startCamera(nextFacingMode);
   }, [facingMode, startCamera]);
+
+  const selectBodySide = useCallback((side: BodySide) => {
+    if (bodySideRef.current === side) return;
+    bodySideRef.current = side;
+    stabilizerRef.current.selectSide(side);
+    forearmEstimatorRef.current.reset();
+    forearmFrameRef.current = null;
+    metricsRef.current = new TrackingMetrics();
+    telemetryHistoryRef.current.clear();
+    telemetryRendererRef.current?.draw([]);
+    lastMetricsUiRef.current = 0;
+    setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setBodySide(side);
+    setForearmDiagnostics({ source: '—', confidence: 0 });
+    setTrackerMessage(`Acquiring ${side} forearm…`);
+  }, []);
 
   useEffect(() => stopCamera, [stopCamera]);
 
@@ -178,6 +209,12 @@ export function ARSessionPage() {
           const rect = video.getBoundingClientRect();
           syncCanvasSize(canvas, rect.width, rect.height);
           if (stabilized.frame && stabilized.opacity > 0) {
+            if (stabilized.state !== 'trackingLost') {
+              forearmFrameRef.current = forearmEstimatorRef.current.update(
+                stabilized.frame,
+                bodySideRef.current,
+              );
+            }
             const transform = new ViewportTransform({
               source: { width: video.videoWidth, height: video.videoHeight },
               display: { width: rect.width, height: rect.height },
@@ -193,6 +230,19 @@ export function ARSessionPage() {
               },
               stabilized.opacity,
             );
+            if (debug && forearmFrameRef.current) {
+              renderer.drawForearmFrame(
+                stabilized.frame,
+                bodySideRef.current,
+                forearmFrameRef.current,
+                transform,
+                {
+                  width: video.videoWidth,
+                  height: video.videoHeight,
+                },
+                stabilized.opacity,
+              );
+            }
           } else {
             renderer.clear();
           }
@@ -201,6 +251,10 @@ export function ARSessionPage() {
           if (nowMs - lastMetricsUiRef.current >= 1000) {
             lastMetricsUiRef.current = nowMs;
             setDiagnosticsSnapshot(metrics);
+            setForearmDiagnostics({
+              source: forearmFrameRef.current?.orientationSource ?? '—',
+              confidence: forearmFrameRef.current?.rollConfidence ?? 0,
+            });
             telemetryHistoryRef.current.push(nowMs, metrics);
             const telemetryCanvas = telemetryCanvasRef.current;
             if (telemetryCanvas) {
@@ -235,7 +289,7 @@ export function ARSessionPage() {
       renderer.clear();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [session]);
+  }, [debug, session]);
 
   useEffect(
     () => () => {
@@ -343,6 +397,20 @@ export function ARSessionPage() {
           A privacy-first live preview. Pose smoothing and confidence recovery
           run entirely on this device.
         </p>
+        <fieldset className="arm-selector">
+          <legend>Target forearm</legend>
+          {(['left', 'right'] as const).map((side) => (
+            <button
+              key={side}
+              type="button"
+              aria-pressed={bodySide === side}
+              onClick={() => selectBodySide(side)}
+            >
+              <span>{side === 'left' ? 'L' : 'R'}</span>
+              {side}
+            </button>
+          ))}
+        </fieldset>
         <div className="controls">
           <button
             className="primary"
@@ -393,6 +461,14 @@ export function ARSessionPage() {
               <span>
                 <small>DROPS</small>
                 <b>{diagnosticsSnapshot.droppedFrames}</b>
+              </span>
+              <span>
+                <small>ROLL SOURCE</small>
+                <b>{forearmDiagnostics.source}</b>
+              </span>
+              <span>
+                <small>ROLL CONF</small>
+                <b>{Math.round(forearmDiagnostics.confidence * 100)}%</b>
               </span>
             </div>
             <canvas

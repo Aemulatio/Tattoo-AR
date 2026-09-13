@@ -67,6 +67,17 @@ describe('PoseStabilizer', () => {
     expect(result.frame).toBeNull();
     expect(stabilizer.side).toBe('left');
   });
+
+  it('resets tracking only when the user selects another side', () => {
+    const stabilizer = trackedStabilizer();
+
+    stabilizer.selectSide('right');
+    const result = stabilizer.process(poseFrame(100, 1, 0.9), 100);
+
+    expect(stabilizer.side).toBe('right');
+    expect(result.state).toBe('acquiring');
+    expect(result.confidence.visibility).toBeCloseTo(0.9);
+  });
 });
 
 function trackedStabilizer(): PoseStabilizer {

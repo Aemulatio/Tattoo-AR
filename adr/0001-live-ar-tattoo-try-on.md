@@ -1,7 +1,9 @@
 # ADR-0001: Browser architecture for live AR tattoo try-on
 
-- **Status:** Proposed
+- **Status:** Accepted — implementation in progress
 - **Date:** 2026-08-30
+- **Last updated:** 2026-09-13
+- **Implementation:** Phase 2 complete; Phase 3 in progress
 - **Scope:** Greenfield proof of concept and MVP
 - **First supported region:** One forearm at a time
 - **Primary reader:** Codex and project contributors
@@ -415,7 +417,17 @@ docs/
 
 Keep math utilities next to the domain that owns them. Do not create a generic `utils/` dumping ground.
 
-## 13. Implementation plan for Codex
+## 13. Implementation plan and status
+
+| Phase                            | State       | Current evidence                                                                                                                                                                                                              |
+| -------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 0 — capability shell       | Complete    | Camera flow, mirroring, viewport transform, diagnostics, and tooling merged in PR #1                                                                                                                                          |
+| Phase 1 — pose tracking          | Complete    | Worker/fallback tracking, backpressure, overlay, cleanup, and memory acceptance merged in PR #3                                                                                                                               |
+| Phase 2 — smoothing and recovery | Complete    | One Euro smoothing, confidence hysteresis, loss recovery, and telemetry merged in PR #5                                                                                                                                       |
+| Phase 3 — forearm surface        | In progress | On `phase-3-forearm-surface`: explicit side selection, stable local frame, hand/transported/neutral orientation evidence, sign-flip guard, and debug axes implemented; mesh, radius, seam, and device feasibility gate remain |
+| Phases 4–7                       | Not started | Blocked on the Phase 3 axial-roll feasibility gate                                                                                                                                                                            |
+
+Update this table when a phase is merged or a feasibility gate changes scope.
 
 Each phase is a separate reviewable change. Codex must run the phase's checks and report the acceptance evidence before starting the next phase.
 

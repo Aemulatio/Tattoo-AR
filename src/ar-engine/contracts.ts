@@ -4,6 +4,10 @@ export interface Vec3 {
   z: number;
 }
 
+export type BodySide = 'left' | 'right';
+
+export type BodyRegion = 'leftForearm' | 'rightForearm';
+
 export interface PosePoint {
   image: Vec3;
   world: Vec3;
