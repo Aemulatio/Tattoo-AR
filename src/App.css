@@ -12,6 +12,7 @@
   background: radial-gradient(circle at 45% 38%, #3f5041, #151b16 60%, #090a09);
 }
 .camera-feed,
+.tattoo-overlay,
 .debug-grid,
 .pose-overlay {
   position: absolute;
@@ -20,15 +21,25 @@
   height: 100%;
   object-fit: cover;
 }
+.camera-feed {
+  z-index: 0;
+}
 .camera-feed.is-mirrored {
   transform: scaleX(-1);
 }
+.tattoo-overlay {
+  z-index: 2;
+  cursor: crosshair;
+  touch-action: none;
+}
 .debug-grid {
+  z-index: 3;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.25s ease;
 }
 .pose-overlay {
+  z-index: 4;
   pointer-events: none;
 }
 .debug-grid.is-visible {
@@ -39,6 +50,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 1;
   background: linear-gradient(
     180deg,
     rgba(0, 0, 0, 0.36),
@@ -49,7 +61,7 @@
 }
 .camera-chrome {
   position: absolute;
-  z-index: 1;
+  z-index: 5;
   top: 22px;
   left: 22px;
   display: flex;
@@ -63,6 +75,7 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   backdrop-filter: blur(10px);
+  pointer-events: none;
 }
 .status-dot {
   width: 7px;
@@ -79,7 +92,7 @@
 }
 .stage-message {
   position: absolute;
-  z-index: 1;
+  z-index: 5;
   left: 50%;
   top: 50%;
   max-width: 300px;
@@ -170,6 +183,48 @@
   border-color: #e1ff48;
   background: rgba(225, 255, 72, 0.08);
   color: #e1ff48;
+}
+.placement-panel {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 22px;
+  padding: 14px;
+  border: 1px solid #3d443b;
+  background:
+    linear-gradient(135deg, rgba(225, 255, 72, 0.06), transparent 62%), #101310;
+}
+.placement-panel > span {
+  color: #e1ff48;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.placement-panel p {
+  margin: 0;
+  color: #aeb5aa;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.placement-panel code {
+  overflow-wrap: anywhere;
+  color: #f4f0e6;
+  font-size: 9px;
+}
+.placement-panel button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #f0a3b9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.placement-panel button:disabled {
+  color: #555c53;
+  cursor: default;
 }
 .controls {
   display: grid;

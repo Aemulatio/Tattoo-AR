@@ -4,9 +4,33 @@ export interface Vec3 {
   z: number;
 }
 
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+
 export type BodySide = 'left' | 'right';
 
 export type BodyRegion = 'leftForearm' | 'rightForearm';
+
+export interface TattooAnchor {
+  schemaVersion: 1;
+  region: BodyRegion;
+  /** Longitudinal position: 0 at the wrist, 1 at the elbow. */
+  u: number;
+  /** Angular position around the surface, normalized to [0, 1). */
+  v: number;
+  /** Size relative to forearm length, never viewport pixels. */
+  width: number;
+  height: number;
+  /** Rotation in the local tangent plane, in radians. */
+  rotation: number;
+}
+
+export interface SurfaceHit {
+  region: BodyRegion;
+  uv: Vec2;
+}
 
 export interface PosePoint {
   image: Vec3;

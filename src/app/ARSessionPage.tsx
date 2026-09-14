@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
 import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
+import { ARRenderer } from '../ar-engine/rendering/ARRenderer';
 import { syncCanvasSize } from '../ar-engine/rendering/syncCanvasSize';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
 import { WorkerPoseTracker } from '../ar-engine/tracking/WorkerPoseTracker';
@@ -17,7 +24,7 @@ import {
   emptyForearmFeasibilitySnapshot,
   ForearmFeasibilityMonitor,
 } from '../ar-engine/diagnostics/ForearmFeasibilityMonitor';
-import type { BodySide } from '../ar-engine/contracts';
+import type { BodySide, TattooAnchor } from '../ar-engine/contracts';
 import {
   ForearmFrameEstimator,
   type ForearmLocalFrame,
@@ -27,6 +34,15 @@ import {
   ForearmRadiusEstimator,
   type ForearmRadiusEstimate,
 } from '../ar-engine/surfaces/forearm/ForearmRadiusEstimator';
+import {
+  constrainTattooAnchorToSurface,
+  createTattooAnchor,
+} from '../ar-engine/tattoo/TattooAnchor';
+import {
+  TattooAssetLoader,
+  TattooAssetLoadSupersededError,
+  type TattooAsset,
+} from '../ar-engine/tattoo/TattooAssetLoader';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -47,8 +63,10 @@ export function ARSessionPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
+  const tattooCanvasRef = useRef<HTMLCanvasElement>(null);
   const telemetryCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef(0);
   const trackerRef = useRef<FallbackPoseTracker | null>(null);
   const stabilizerRef = useRef(new PoseStabilizer({ selectedSide: 'left' }));
   const forearmEstimatorRef = useRef(new ForearmFrameEstimator());
@@ -56,8 +74,13 @@ export function ARSessionPage() {
   const radiusEstimatorRef = useRef(new ForearmRadiusEstimator());
   const radiusEstimateRef = useRef<ForearmRadiusEstimate | null>(null);
   const feasibilityMonitorRef = useRef(new ForearmFeasibilityMonitor());
+  const arRendererRef = useRef<ARRenderer | null>(null);
+  const viewportTransformRef = useRef<ViewportTransform | null>(null);
+  const tattooAnchorRef = useRef<TattooAnchor | null>(null);
+  const tattooAssetRef = useRef<TattooAsset | null>(null);
+  const canPlaceTattooRef = useRef(false);
   const bodySideRef = useRef<BodySide>('left');
-  const isMirroredRef = useRef(true);
+  const isMirroredRef = useRef(false);
   const metricsRef = useRef(new TrackingMetrics());
   const telemetryHistoryRef = useRef(new TelemetryHistory());
   const telemetryRendererRef = useRef<TelemetryGraphRenderer | null>(null);
@@ -65,9 +88,13 @@ export function ARSessionPage() {
   const [session, setSession] = useState<SessionState>('idle');
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [bodySide, setBodySide] = useState<BodySide>('left');
-  const [isMirrored, setIsMirrored] = useState(true);
+  const [isMirrored, setIsMirrored] = useState(false);
   const [message, setMessage] = useState(initialError);
   const [trackerMessage, setTrackerMessage] = useState('Tracker idle');
+  const [tattooMessage, setTattooMessage] = useState(
+    'Start the camera, then tap the tracked forearm to place the fixture.',
+  );
+  const [tattooAnchor, setTattooAnchor] = useState<TattooAnchor | null>(null);
   const [diagnosticsSnapshot, setDiagnosticsSnapshot] =
     useState<TrackingMetricsSnapshot>(initialDiagnosticsSnapshot);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
@@ -89,7 +116,67 @@ export function ARSessionPage() {
     isMirroredRef.current = isMirrored;
   }, [isMirrored]);
 
+  const placeTattoo = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      if (!canPlaceTattooRef.current) {
+        setTattooMessage('Hold the forearm steady until tracking is stable.');
+        return;
+      }
+      const renderer = arRendererRef.current;
+      const transform = viewportTransformRef.current;
+      const asset = tattooAssetRef.current;
+      if (!renderer || !transform || !asset) {
+        setTattooMessage('Tattoo renderer is still loading.');
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      const hit = renderer.hitTest(
+        { x: event.clientX - rect.left, y: event.clientY - rect.top },
+        transform,
+      );
+      if (!hit) {
+        setTattooMessage(
+          'No visible forearm surface there. Try its front side.',
+        );
+        return;
+      }
+
+      const height = 0.3;
+      const placement = constrainTattooAnchorToSurface(
+        createTattooAnchor({
+          region: hit.region,
+          u: hit.uv.x,
+          v: hit.uv.y,
+          width: Math.min(0.3, height * asset.aspectRatio),
+          height,
+          rotation: 0,
+        }),
+      );
+      const { anchor } = placement;
+      tattooAnchorRef.current = anchor;
+      renderer.setAnchor(anchor);
+      setTattooAnchor(anchor);
+      setTattooMessage(
+        placement.boundaryClamped
+          ? 'Fixture anchored and clamped inside the forearm boundary.'
+          : 'Fixture anchored in forearm UV space.',
+      );
+    },
+    [],
+  );
+
+  const clearTattoo = useCallback(() => {
+    tattooAnchorRef.current = null;
+    arRendererRef.current?.setAnchor(null);
+    setTattooAnchor(null);
+    setTattooMessage('Placement cleared. Tap the forearm to place it again.');
+  }, []);
+
   const stopCamera = useCallback(() => {
+    cameraRequestRef.current += 1;
+    canPlaceTattooRef.current = false;
+    arRendererRef.current?.clearSurface();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -106,8 +193,10 @@ export function ARSessionPage() {
       }
 
       stopCamera();
+      const request = cameraRequestRef.current;
       setSession('requestingCamera');
       setMessage('Waiting for camera permission…');
+      let acquiredStream: MediaStream | null = null;
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -117,14 +206,31 @@ export function ARSessionPage() {
             height: { ideal: 1080 },
           },
         });
-        streamRef.current = stream;
+        acquiredStream = stream;
+        if (request !== cameraRequestRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         const video = videoRef.current;
-        if (!video) return;
+        if (!video) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = stream;
         video.srcObject = stream;
         await video.play();
+        if (request !== cameraRequestRef.current) return;
         setSession('previewing');
         setMessage('Camera ready. Loading pose tracker…');
       } catch (error) {
+        acquiredStream?.getTracks().forEach((track) => track.stop());
+        if (streamRef.current === acquiredStream) {
+          streamRef.current = null;
+          if (videoRef.current?.srcObject === acquiredStream) {
+            videoRef.current.srcObject = null;
+          }
+        }
+        if (request !== cameraRequestRef.current) return;
         const detail =
           error instanceof DOMException ? error.name : 'Unknown error';
         setMessage(
@@ -152,6 +258,8 @@ export function ARSessionPage() {
     setForearmDiagnostics(initialForearmDiagnostics());
     setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
     setFacingMode(nextFacingMode);
+    isMirroredRef.current = nextFacingMode === 'user';
+    setIsMirrored(nextFacingMode === 'user');
     setMessage('Switching camera…');
     void startCamera(nextFacingMode);
   }, [facingMode, startCamera]);
@@ -165,6 +273,8 @@ export function ARSessionPage() {
     radiusEstimatorRef.current.reset();
     radiusEstimateRef.current = null;
     feasibilityMonitorRef.current.reset();
+    canPlaceTattooRef.current = false;
+    arRendererRef.current?.clearSurface();
     metricsRef.current = new TrackingMetrics();
     telemetryHistoryRef.current.clear();
     telemetryRendererRef.current?.draw([]);
@@ -181,7 +291,8 @@ export function ARSessionPage() {
   useEffect(() => {
     const video = videoRef.current;
     const canvas = poseCanvasRef.current;
-    if (session !== 'previewing' || !video || !canvas) return;
+    const tattooCanvas = tattooCanvasRef.current;
+    if (session !== 'previewing' || !video || !canvas || !tattooCanvas) return;
     const tracker =
       trackerRef.current ??
       new FallbackPoseTracker(
@@ -189,12 +300,47 @@ export function ARSessionPage() {
         () => new MainThreadPoseTracker(),
       );
     trackerRef.current = tracker;
-    const renderer = new PoseDebugRenderer(canvas);
+    const poseRenderer = new PoseDebugRenderer(canvas);
     const forearmGeometry = new ForearmGeometry();
+    let arRenderer: ARRenderer;
+    try {
+      arRenderer = new ARRenderer(tattooCanvas, forearmGeometry, {
+        onRender: (timestampMs) => metricsRef.current.recordRender(timestampMs),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      queueMicrotask(() => {
+        setTrackerMessage(`Renderer failed: ${detail}`);
+        setMessage(`Could not start WebGL rendering (${detail}).`);
+        setSession('error');
+      });
+      forearmGeometry.dispose();
+      return;
+    }
+    const tattooLoader = new TattooAssetLoader();
     let stopFrames: () => void = () => {};
     let unsubscribe: () => void = () => {};
     let cancelled = false;
     let initialized = false;
+    arRendererRef.current = arRenderer;
+    arRenderer.setAnchor(tattooAnchorRef.current);
+    if (!document.hidden) arRenderer.start();
+    void tattooLoader
+      .replace(
+        `${import.meta.env.BASE_URL}test-fixtures/botanical-crescent.png`,
+      )
+      .then((asset) => {
+        if (cancelled) return;
+        tattooAssetRef.current = asset;
+        arRenderer.setTattoo(asset);
+        setTattooMessage('Fixture ready. Tap the tracked forearm to place it.');
+      })
+      .catch((error: unknown) => {
+        if (cancelled || error instanceof TattooAssetLoadSupersededError)
+          return;
+        const detail = error instanceof Error ? error.message : 'unknown error';
+        setTattooMessage(`Could not load tattoo fixture (${detail}).`);
+      });
     const startScheduling = () => {
       stopFrames();
       if (!cancelled && !document.hidden) {
@@ -204,8 +350,14 @@ export function ARSessionPage() {
       }
     };
     const onVisibilityChange = () => {
-      if (document.hidden) stopFrames();
-      else if (initialized) startScheduling();
+      if (document.hidden) {
+        canPlaceTattooRef.current = false;
+        stopFrames();
+        arRenderer.pause();
+      } else {
+        arRenderer.start();
+        if (initialized) startScheduling();
+      }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     void tracker
@@ -227,6 +379,7 @@ export function ARSessionPage() {
             : 'main-thread fallback';
         setTrackerMessage(`Pose tracker active (${trackerMode})`);
         unsubscribe = tracker.subscribe((frame) => {
+          canPlaceTattooRef.current = false;
           const nowMs = performance.now();
           const stabilized = stabilizerRef.current.process(frame, nowMs);
           metricsRef.current.recordResult(frame, nowMs);
@@ -266,7 +419,30 @@ export function ARSessionPage() {
               fit: 'cover',
               mirrored: isMirroredRef.current,
             });
-            renderer.draw(
+            viewportTransformRef.current = transform;
+            arRenderer.resize(
+              rect.width,
+              rect.height,
+              window.devicePixelRatio || 1,
+            );
+            if (forearmFrameRef.current && radiusEstimateRef.current) {
+              arRenderer.updateSurface({
+                poseFrame: stabilized.frame,
+                side: bodySideRef.current,
+                localFrame: forearmFrameRef.current,
+                radii: radiusEstimateRef.current.radii,
+                transform,
+                sourceSize: {
+                  width: video.videoWidth,
+                  height: video.videoHeight,
+                },
+                opacity: stabilized.opacity,
+              });
+              canPlaceTattooRef.current = stabilized.state === 'tracking';
+            } else {
+              arRenderer.clearSurface();
+            }
+            poseRenderer.draw(
               stabilized.frame,
               transform,
               {
@@ -276,7 +452,7 @@ export function ARSessionPage() {
               stabilized.opacity,
             );
             if (debug && forearmFrameRef.current) {
-              renderer.drawForearmWireframe(
+              poseRenderer.drawForearmWireframe(
                 stabilized.frame,
                 bodySideRef.current,
                 forearmFrameRef.current,
@@ -288,7 +464,7 @@ export function ARSessionPage() {
                 },
                 stabilized.opacity,
               );
-              renderer.drawForearmFrame(
+              poseRenderer.drawForearmFrame(
                 stabilized.frame,
                 bodySideRef.current,
                 forearmFrameRef.current,
@@ -301,9 +477,9 @@ export function ARSessionPage() {
               );
             }
           } else {
-            renderer.clear();
+            poseRenderer.clear();
+            arRenderer.clearSurface();
           }
-          metricsRef.current.recordRender(nowMs);
           const metrics = metricsRef.current.snapshot();
           if (nowMs - lastMetricsUiRef.current >= 1000) {
             lastMetricsUiRef.current = nowMs;
@@ -341,6 +517,8 @@ export function ARSessionPage() {
       })
       .catch((error: unknown) => {
         if (cancelled) return;
+        canPlaceTattooRef.current = false;
+        arRenderer.clearSurface();
         if (trackerRef.current === tracker) trackerRef.current = null;
         void tracker.dispose();
         const detail = error instanceof Error ? error.message : 'unknown error';
@@ -352,7 +530,13 @@ export function ARSessionPage() {
       cancelled = true;
       stopFrames();
       unsubscribe();
-      renderer.clear();
+      poseRenderer.clear();
+      tattooLoader.dispose();
+      arRenderer.dispose();
+      canPlaceTattooRef.current = false;
+      if (arRendererRef.current === arRenderer) arRendererRef.current = null;
+      tattooAssetRef.current = null;
+      viewportTransformRef.current = null;
       forearmGeometry.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
@@ -371,9 +555,39 @@ export function ARSessionPage() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    const drawGrid = () => {
+    const syncViewport = () => {
       const rect = video.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
+      if (
+        !rect.width ||
+        !rect.height ||
+        !video.videoWidth ||
+        !video.videoHeight
+      ) {
+        return null;
+      }
+      const transform = new ViewportTransform({
+        source: { width: video.videoWidth, height: video.videoHeight },
+        display: { width: rect.width, height: rect.height },
+        fit: 'cover',
+        mirrored: isMirrored,
+      });
+      viewportTransformRef.current = transform;
+      arRendererRef.current?.resize(
+        rect.width,
+        rect.height,
+        window.devicePixelRatio || 1,
+      );
+      arRendererRef.current?.updateViewport(transform, {
+        width: video.videoWidth,
+        height: video.videoHeight,
+      });
+      return { rect, transform };
+    };
+
+    const drawGrid = () => {
+      const viewport = syncViewport();
+      if (!viewport) return;
+      const { rect } = viewport;
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
@@ -404,13 +618,9 @@ export function ARSessionPage() {
     const resize = new ResizeObserver(drawGrid);
     resize.observe(video);
     const onLoadedMetadata = () => {
-      const rect = video.getBoundingClientRect();
-      const transform = new ViewportTransform({
-        source: { width: video.videoWidth, height: video.videoHeight },
-        display: { width: rect.width, height: rect.height },
-        fit: 'cover',
-        mirrored: isMirrored,
-      });
+      const viewport = syncViewport();
+      if (!viewport) return;
+      const { rect, transform } = viewport;
       const center = transform.sourceToDisplay({
         x: video.videoWidth / 2,
         y: video.videoHeight / 2,
@@ -422,6 +632,7 @@ export function ARSessionPage() {
       drawGrid();
     };
     video.addEventListener('loadedmetadata', onLoadedMetadata);
+    drawGrid();
     return () => {
       resize.disconnect();
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -436,6 +647,12 @@ export function ARSessionPage() {
           className={`camera-feed ${isMirrored ? 'is-mirrored' : ''}`}
           playsInline
           muted
+        />
+        <canvas
+          ref={tattooCanvasRef}
+          className="tattoo-overlay"
+          aria-label="Tap the visible forearm to place the tattoo fixture"
+          onPointerDown={placeTattoo}
         />
         <canvas
           ref={canvasRef}
@@ -458,11 +675,11 @@ export function ARSessionPage() {
       </section>
 
       <section className="control-panel" aria-label="Camera controls">
-        <p className="eyebrow">Phase 3 · forearm surface lab</p>
+        <p className="eyebrow">Phase 4 · body-local ink lab</p>
         <h1>Ink, held in place.</h1>
         <p className="lede">
-          A privacy-first live preview. The tapered surface, stable seam, and
-          roll evidence run entirely on this device.
+          Tap the visible forearm to pin the transparent fixture to its curved
+          surface. Its anchor stays in body coordinates—not screen pixels.
         </p>
         <fieldset className="arm-selector">
           <legend>Target forearm</legend>
@@ -478,6 +695,19 @@ export function ARSessionPage() {
             </button>
           ))}
         </fieldset>
+        <div className="placement-panel" aria-live="polite">
+          <span>Tattoo fixture</span>
+          <p>{tattooMessage}</p>
+          {tattooAnchor && (
+            <code>
+              {tattooAnchor.region} · u {tattooAnchor.u.toFixed(3)} · v{' '}
+              {tattooAnchor.v.toFixed(3)}
+            </code>
+          )}
+          <button type="button" onClick={clearTattoo} disabled={!tattooAnchor}>
+            Clear placement
+          </button>
+        </div>
         <div className="controls">
           <button
             className="primary"
