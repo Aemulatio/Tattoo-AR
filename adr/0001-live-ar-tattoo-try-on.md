@@ -2,8 +2,8 @@
 
 - **Status:** Accepted — implementation in progress
 - **Date:** 2026-08-30
-- **Last updated:** 2026-09-13
-- **Implementation:** Phase 3 complete; Phase 4 in progress
+- **Last updated:** 2026-09-14
+- **Implementation:** Phase 4 complete; Phase 5 not started
 - **Scope:** Greenfield proof of concept and MVP
 - **First supported region:** One forearm at a time
 - **Primary reader:** Codex and project contributors
@@ -423,14 +423,14 @@ Keep math utilities next to the domain that owns them. Do not create a generic `
 
 ## 13. Implementation plan and status
 
-| Phase                            | State       | Current evidence                                                                                                                                                                                                                                                                                                                                            |
-| -------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 0 — capability shell       | Complete    | Camera flow, mirroring, viewport transform, diagnostics, and tooling merged in PR #1                                                                                                                                                                                                                                                                        |
-| Phase 1 — pose tracking          | Complete    | Worker/fallback tracking, backpressure, overlay, cleanup, and memory acceptance merged in PR #3                                                                                                                                                                                                                                                             |
-| Phase 2 — smoothing and recovery | Complete    | One Euro smoothing, confidence hysteresis, loss recovery, and telemetry merged in PR #5                                                                                                                                                                                                                                                                     |
-| Phase 3 — forearm surface        | Complete    | Side selection, stable local frame, continuous roll/confidence, reusable 12×24 tapered mesh, UVs, wireframe, seam, callback-local mask radius sampling, temporal radius stabilization, anatomical fallback, and measurable flip/radius telemetry implemented; desktop and iPhone 16 Pro Max checks passed; Android explicitly deferred from MVP scope       |
-| Phase 4 — tattoo anchoring       | In progress | On `codex/phase-4-tattoo-anchoring`: versioned body-local anchor validation, transparent fixture and disposable texture lifecycle, shared forearm projection, front-facing UV raycast, independent WebGL render loop, curved UV ink shader, and tap placement implemented; desktop and iOS Safari placement checks passed; drag, pinch, and rotation remain |
-| Phases 5–7                       | Not started | Blocked on Phase 4 anchoring acceptance                                                                                                                                                                                                                                                                                                                     |
+| Phase                            | State       | Current evidence                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 0 — capability shell       | Complete    | Camera flow, mirroring, viewport transform, diagnostics, and tooling merged in PR #1                                                                                                                                                                                                                                                                                  |
+| Phase 1 — pose tracking          | Complete    | Worker/fallback tracking, backpressure, overlay, cleanup, and memory acceptance merged in PR #3                                                                                                                                                                                                                                                                       |
+| Phase 2 — smoothing and recovery | Complete    | One Euro smoothing, confidence hysteresis, loss recovery, and telemetry merged in PR #5                                                                                                                                                                                                                                                                               |
+| Phase 3 — forearm surface        | Complete    | Side selection, stable local frame, continuous roll/confidence, reusable 12×24 tapered mesh, UVs, wireframe, seam, callback-local mask radius sampling, temporal radius stabilization, anatomical fallback, and measurable flip/radius telemetry implemented; desktop and iPhone 16 Pro Max checks passed; Android explicitly deferred from MVP scope                 |
+| Phase 4 — tattoo anchoring       | Complete    | Body-local anchor validation, disposable fixture textures, shared forearm projection, front-facing UV raycast, independent WebGL rendering, curved ink shader, tap/drag placement, proportional pinch scaling, tangent-plane rotation, seam wrapping, and boundary feedback implemented; automated checks plus desktop and iOS Safari placement/gesture checks passed |
+| Phases 5–7                       | Not started | Phase 4 is accepted; Phase 5 is next, with Phases 6–7 remaining sequentially gated                                                                                                                                                                                                                                                                                    |
 
 Update this table when a phase is merged or a feasibility gate changes scope.
 
@@ -593,6 +593,15 @@ Acceptance:
 - camera/model errors are recoverable without a page refresh;
 - engine cleanup passes repeated mount/start/stop cycles;
 - no camera frame or uploaded image is sent over the network.
+
+### Post-Phase 7 — tracking and surface fidelity follow-up
+
+Phase 4 manual review identified two visible quality limitations that are explicitly deferred until after MVP hardening:
+
+- reduce the remaining small tattoo-image jumps during normal arm motion, guided by recorded measurements rather than opaque extra smoothing;
+- improve the anatomical fit of the tapered elliptical forearm mesh, especially around the wrist/elbow transition and changing viewing angles.
+
+These refinements must preserve the versioned body-local anchor and must not silently re-anchor the tattoo.
 
 ## 14. Test strategy
 

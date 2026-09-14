@@ -132,6 +132,10 @@ export class ARRenderer {
     this.tattooPatch.setAnchor(anchor);
   }
 
+  crossesTattooSeam(anchor: TattooAnchor): boolean {
+    return this.tattooPatch.crossesSeam(anchor);
+  }
+
   hitTest(point: Vec2, transform: ViewportTransform): SurfaceHit | null {
     if (!this.projectedSurface.ready) return null;
     return this.surfaceRaycaster.hitTest(point, transform);

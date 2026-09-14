@@ -15,6 +15,7 @@ export class TattooPatch {
   private asset: TattooAsset | null = null;
   private surfaceSide: BodySide | null = null;
   private surfaceReady = false;
+  private circumferenceRatio = 0.7;
 
   constructor(geometry: BufferGeometry) {
     const bundle = createTattooMaterial();
@@ -52,10 +53,23 @@ export class TattooPatch {
     const radial = lerp(radii.wrist.radial, radii.elbow.radial, u);
     const tangent = lerp(radii.wrist.tangent, radii.elbow.tangent, u);
     const meanRadius = (radial + tangent) / 2;
-    this.controls.setCircumferenceRatio(
-      (Math.PI * 2 * meanRadius) / frame.length,
-    );
+    this.circumferenceRatio = (Math.PI * 2 * meanRadius) / frame.length;
+    this.controls.setCircumferenceRatio(this.circumferenceRatio);
     this.updateVisibility();
+  }
+
+  crossesSeam(anchor: TattooAnchor): boolean {
+    const circumferentialHalfExtent =
+      (Math.abs(Math.cos(anchor.rotation)) * anchor.width +
+        Math.abs(Math.sin(anchor.rotation)) * anchor.height) /
+      2;
+    const angularHalfExtent =
+      circumferentialHalfExtent / this.circumferenceRatio;
+    return (
+      angularHalfExtent >= 0.5 ||
+      anchor.v - angularHalfExtent < 0 ||
+      anchor.v + angularHalfExtent > 1
+    );
   }
 
   clearSurface(): void {

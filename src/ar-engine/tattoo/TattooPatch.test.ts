@@ -56,6 +56,36 @@ describe('TattooPatch', () => {
 
     expect(materialDispose).toHaveBeenCalledOnce();
   });
+
+  it('reports when the rotated physical patch crosses the UV seam', () => {
+    const patch = new TattooPatch(new BufferGeometry());
+    patch.updateSurface('left', frame, radii());
+
+    expect(
+      patch.crossesSeam(
+        createTattooAnchor({
+          region: 'leftForearm',
+          u: 0.5,
+          v: 0.05,
+          width: 0.2,
+          height: 0.3,
+          rotation: 0,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      patch.crossesSeam(
+        createTattooAnchor({
+          region: 'leftForearm',
+          u: 0.5,
+          v: 0.5,
+          width: 0.2,
+          height: 0.3,
+          rotation: 0,
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 function radii() {
