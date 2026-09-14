@@ -62,6 +62,7 @@ import {
   type TattooGestureKind,
   type TattooGestureUpdate,
 } from '../ar-engine/tattoo/TattooGestureController';
+import { createSessionFailure, type SessionFailure } from './session-errors';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
@@ -91,8 +92,10 @@ export function ARSessionPage() {
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
   const tattooCanvasRef = useRef<HTMLCanvasElement>(null);
   const telemetryCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sessionErrorPanelRef = useRef<HTMLElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraRequestRef = useRef(0);
+  const restartInFlightRef = useRef(false);
   const trackerRef = useRef<FallbackPoseTracker | null>(null);
   const stabilizerRef = useRef(new PoseStabilizer({ selectedSide: 'left' }));
   const forearmEstimatorRef = useRef(new ForearmFrameEstimator());
@@ -118,6 +121,10 @@ export function ARSessionPage() {
   const telemetryRendererRef = useRef<TelemetryGraphRenderer | null>(null);
   const lastMetricsUiRef = useRef(0);
   const [session, setSession] = useState<SessionState>('idle');
+  const [sessionFailure, setSessionFailure] = useState<SessionFailure | null>(
+    null,
+  );
+  const [isRestarting, setIsRestarting] = useState(false);
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [bodySide, setBodySide] = useState<BodySide>('left');
   const [isMirrored, setIsMirrored] = useState(false);
@@ -252,6 +259,14 @@ export function ARSessionPage() {
     tattooVisibleRef.current = tattooVisible;
     arRendererRef.current?.setTattooVisible(tattooVisible);
   }, [tattooVisible]);
+
+  useEffect(() => {
+    if (!sessionFailure) return;
+    const animationFrame = requestAnimationFrame(() => {
+      sessionErrorPanelRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(animationFrame);
+  }, [sessionFailure]);
 
   const handleTattooPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -505,13 +520,17 @@ export function ARSessionPage() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
+  const failSession = useCallback((failure: SessionFailure) => {
+    setSessionFailure(failure);
+    setMessage(failure.guidance);
+    setSession('error');
+  }, []);
+
   const startCamera = useCallback(
     async (requestedFacingMode = facingMode) => {
+      setSessionFailure(null);
       if (!navigator.mediaDevices?.getUserMedia) {
-        setMessage(
-          'This browser does not provide camera access. Try a current mobile browser over HTTPS.',
-        );
-        setSession('error');
+        failSession(createSessionFailure('compatibility'));
         return;
       }
 
@@ -544,6 +563,7 @@ export function ARSessionPage() {
         video.srcObject = stream;
         await video.play();
         if (request !== cameraRequestRef.current) return;
+        setSessionFailure(null);
         setSession('previewing');
         setMessage('Camera ready. Loading pose tracker…');
       } catch (error) {
@@ -555,16 +575,50 @@ export function ARSessionPage() {
           }
         }
         if (request !== cameraRequestRef.current) return;
-        const detail =
-          error instanceof DOMException ? error.name : 'Unknown error';
-        setMessage(
-          `Could not start the camera (${detail}). Check permission, then try again.`,
-        );
-        setSession('error');
+        failSession(createSessionFailure('camera', error));
       }
     },
-    [facingMode, stopCamera],
+    [facingMode, failSession, stopCamera],
   );
+
+  const restartSession = useCallback(async () => {
+    if (restartInFlightRef.current) return;
+    restartInFlightRef.current = true;
+    setIsRestarting(true);
+    setSessionFailure(null);
+    setSession('requestingCamera');
+    setMessage('Rebuilding the camera and on-device tracker…');
+    stopCamera();
+
+    const tracker = trackerRef.current;
+    trackerRef.current = null;
+    try {
+      await tracker?.dispose();
+    } catch {
+      // A failed tracker is replaced below even when its cleanup reports an error.
+    }
+    stabilizerRef.current.reset();
+    forearmEstimatorRef.current.reset();
+    forearmFrameRef.current = null;
+    radiusEstimatorRef.current.reset();
+    radiusEstimateRef.current = null;
+    feasibilityMonitorRef.current.reset();
+    metricsRef.current = new TrackingMetrics();
+    telemetryHistoryRef.current.clear();
+    telemetryRendererRef.current?.draw([]);
+    lastMetricsUiRef.current = 0;
+    setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setForearmDiagnostics(initialForearmDiagnostics());
+    setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
+    setTrackerMessage('Tracker restarting…');
+
+    try {
+      await startCamera(facingMode);
+    } finally {
+      restartInFlightRef.current = false;
+      setIsRestarting(false);
+    }
+  }, [facingMode, startCamera, stopCamera]);
 
   const switchCamera = useCallback(() => {
     const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
@@ -645,8 +699,7 @@ export function ARSessionPage() {
       const detail = error instanceof Error ? error.message : 'unknown error';
       queueMicrotask(() => {
         setTrackerMessage(`Renderer failed: ${detail}`);
-        setMessage(`Could not start WebGL rendering (${detail}).`);
-        setSession('error');
+        failSession(createSessionFailure('renderer', error));
       });
       forearmGeometry.dispose();
       return;
@@ -849,10 +902,9 @@ export function ARSessionPage() {
         arRenderer.clearSurface();
         if (trackerRef.current === tracker) trackerRef.current = null;
         void tracker.dispose();
-        const detail = error instanceof Error ? error.message : 'unknown error';
-        setTrackerMessage(`Tracker failed: ${detail}`);
-        setMessage(`Could not load pose tracking (${detail}). Try again.`);
-        setSession('error');
+        const failure = createSessionFailure('tracker', error);
+        setTrackerMessage(failure.title);
+        failSession(failure);
       });
     return () => {
       cancelled = true;
@@ -868,7 +920,7 @@ export function ARSessionPage() {
       forearmGeometry.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [debug, session]);
+  }, [debug, failSession, session]);
 
   useEffect(
     () => () => {
@@ -1002,7 +1054,9 @@ export function ARSessionPage() {
           <span>{trackerMessage}</span>
         </div>
         {session !== 'previewing' && (
-          <div className="stage-message">{message}</div>
+          <div className="stage-message" role="status" aria-live="polite">
+            {message}
+          </div>
         )}
       </section>
 
@@ -1013,6 +1067,36 @@ export function ARSessionPage() {
           Choose a PNG or JPEG, then hold one forearm fully in frame. Tap to
           place; drag to move; pinch and twist to resize and rotate.
         </p>
+        {sessionFailure && (
+          <section
+            ref={sessionErrorPanelRef}
+            className="session-error-panel"
+            role="alert"
+            tabIndex={-1}
+            aria-labelledby="session-error-title"
+            aria-describedby="session-error-guidance"
+          >
+            <div className="session-error-heading">
+              <span>Session issue</span>
+              <b>{sessionFailure.category}</b>
+            </div>
+            <h2 id="session-error-title">{sessionFailure.title}</h2>
+            <p id="session-error-guidance">{sessionFailure.guidance}</p>
+            {sessionFailure.technicalDetail && (
+              <code>{sessionFailure.technicalDetail}</code>
+            )}
+            <button
+              type="button"
+              onClick={() => void restartSession()}
+              disabled={isRestarting}
+            >
+              {isRestarting ? 'Restarting…' : sessionFailure.retryLabel}
+            </button>
+            <small>
+              Artwork, placement, and appearance settings stay saved.
+            </small>
+          </section>
+        )}
         <section
           className={`artwork-panel is-${artwork.status}`}
           aria-labelledby="artwork-heading"
@@ -1273,10 +1357,22 @@ export function ARSessionPage() {
           <button
             className="primary"
             type="button"
-            onClick={() => void startCamera()}
-            disabled={session === 'requestingCamera'}
+            onClick={() =>
+              session === 'previewing' || session === 'error'
+                ? void restartSession()
+                : void startCamera()
+            }
+            disabled={session === 'requestingCamera' || isRestarting}
           >
-            {session === 'requestingCamera' ? 'Connecting…' : 'Start camera'}
+            {isRestarting
+              ? 'Restarting…'
+              : session === 'requestingCamera'
+                ? 'Connecting…'
+                : session === 'previewing'
+                  ? 'Restart session'
+                  : session === 'error'
+                    ? (sessionFailure?.retryLabel ?? 'Retry session')
+                    : 'Start camera'}
           </button>
           <button className="secondary" type="button" onClick={switchCamera}>
             Use {facingMode === 'user' ? 'rear' : 'selfie'} camera
@@ -1289,15 +1385,6 @@ export function ARSessionPage() {
             {isMirrored ? 'Unmirror preview' : 'Mirror preview'}
           </button>
         </div>
-        {session === 'error' && (
-          <button
-            className="retry"
-            type="button"
-            onClick={() => void startCamera()}
-          >
-            Try again
-          </button>
-        )}
         {debug && (
           <details className="diagnostics" open>
             <summary>Development diagnostics</summary>

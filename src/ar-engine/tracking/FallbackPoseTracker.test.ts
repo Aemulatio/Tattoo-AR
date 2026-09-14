@@ -7,7 +7,7 @@ const config: TrackerConfig = {
   modelAssetPath: '/models/pose.task',
 };
 
-function fakeTracker(initializeError?: Error): PoseTracker & {
+function fakeTracker(initializeError?: unknown): PoseTracker & {
   initialize: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 } {
@@ -81,5 +81,18 @@ describe('FallbackPoseTracker', () => {
     );
     expect(worker.dispose).toHaveBeenCalledOnce();
     expect(fallback.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('describes browser load events without exposing object coercion', async () => {
+    const worker = fakeTracker(new Error('Pose worker failed to load'));
+    const fallback = fakeTracker(new Event('error'));
+    const tracker = new FallbackPoseTracker(
+      () => worker,
+      () => fallback,
+    );
+
+    await expect(tracker.initialize(config)).rejects.toThrow(
+      'Worker tracker failed (Pose worker failed to load); main-thread fallback failed (Browser resource load failed)',
+    );
   });
 });
