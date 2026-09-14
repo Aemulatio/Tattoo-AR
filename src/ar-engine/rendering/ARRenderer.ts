@@ -20,6 +20,7 @@ import type { TattooAppearance } from '../tattoo/tattoo-shader';
 import { bodyMaskForSide } from './BodyMaskPolicy';
 import { ForearmProjector, forearmProjectionCamera } from './ForearmProjector';
 import { ProjectedForearmGeometry } from './ProjectedForearmGeometry';
+import { resolveRenderPixelRatio } from './RenderResolution';
 
 export interface ARRendererSurfaceInput {
   poseFrame: PoseFrame;
@@ -82,9 +83,17 @@ export class ARRenderer {
     this.scene.add(this.tattooPatch.mesh);
   }
 
-  resize(width: number, height: number, devicePixelRatio = 1): void {
+  resize(
+    width: number,
+    height: number,
+    devicePixelRatio = 1,
+    maximumPixelRatio = 2,
+  ): void {
     if (width <= 0 || height <= 0 || this.disposed) return;
-    const pixelRatio = Math.min(2, Math.max(1, devicePixelRatio));
+    const pixelRatio = resolveRenderPixelRatio(
+      devicePixelRatio,
+      maximumPixelRatio,
+    );
     if (
       width === this.width &&
       height === this.height &&

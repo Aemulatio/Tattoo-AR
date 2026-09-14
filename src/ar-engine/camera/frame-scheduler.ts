@@ -3,6 +3,7 @@ import { MonotonicTimestamp } from './MonotonicTimestamp';
 
 export interface FrameSchedulerOptions {
   onFrameDropped?(): void;
+  getTargetFramesPerSecond?(): number;
 }
 
 export function startFrameScheduler(
@@ -14,12 +15,14 @@ export function startFrameScheduler(
   const timestamps = new MonotonicTimestamp();
   let busy = false;
   let lastTimestamp = 0;
-  const minIntervalMs = 1000 / 20;
 
   const submitNewestFrame = async (timestampMs: number) => {
     if (!active || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
       return;
-    if (busy || timestampMs - lastTimestamp < minIntervalMs) {
+    const minimumIntervalMs = frameIntervalMs(
+      options.getTargetFramesPerSecond?.(),
+    );
+    if (busy || timestampMs - lastTimestamp < minimumIntervalMs) {
       options.onFrameDropped?.();
       return;
     }
@@ -52,4 +55,11 @@ export function startFrameScheduler(
   return () => {
     active = false;
   };
+}
+
+export function frameIntervalMs(targetFramesPerSecond = 20): number {
+  const finiteTarget = Number.isFinite(targetFramesPerSecond)
+    ? targetFramesPerSecond
+    : 20;
+  return 1000 / Math.min(60, Math.max(1, finiteTarget));
 }

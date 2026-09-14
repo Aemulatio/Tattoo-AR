@@ -7,9 +7,17 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
+import {
+  AdaptiveTrackingCadence,
+  type TrackingCadenceSnapshot,
+} from '../ar-engine/camera/AdaptiveTrackingCadence';
 import { startFrameScheduler } from '../ar-engine/camera/frame-scheduler';
 import { PoseDebugRenderer } from '../ar-engine/rendering/PoseDebugRenderer';
 import { ARRenderer } from '../ar-engine/rendering/ARRenderer';
+import {
+  renderPixelRatioCap,
+  type RenderResolutionMode,
+} from '../ar-engine/rendering/RenderResolution';
 import { syncCanvasSize } from '../ar-engine/rendering/syncCanvasSize';
 import { MainThreadPoseTracker } from '../ar-engine/tracking/MainThreadPoseTracker';
 import { WorkerPoseTracker } from '../ar-engine/tracking/WorkerPoseTracker';
@@ -68,6 +76,22 @@ import { getCapabilityReport, type SessionState } from './session-state';
 type FacingMode = 'user' | 'environment';
 type ArtworkStatus = 'loading' | 'ready' | 'error';
 
+const renderResolutionModes: readonly RenderResolutionMode[] = [
+  'auto',
+  'sharp',
+  'efficient',
+];
+const renderResolutionLabels: Record<RenderResolutionMode, string> = {
+  auto: 'Auto',
+  sharp: 'Sharp',
+  efficient: 'Efficient',
+};
+const initialCadenceSnapshot: TrackingCadenceSnapshot = {
+  level: 'quality',
+  targetFramesPerSecond: 20,
+  smoothedInferenceMs: 0,
+};
+
 interface ArtworkState {
   status: ArtworkStatus;
   name: string;
@@ -117,6 +141,8 @@ export function ARSessionPage() {
   const bodySideRef = useRef<BodySide>('left');
   const isMirroredRef = useRef(false);
   const metricsRef = useRef(new TrackingMetrics());
+  const cadenceRef = useRef(new AdaptiveTrackingCadence());
+  const renderResolutionModeRef = useRef<RenderResolutionMode>('auto');
   const telemetryHistoryRef = useRef(new TelemetryHistory());
   const telemetryRendererRef = useRef<TelemetryGraphRenderer | null>(null);
   const lastMetricsUiRef = useRef(0);
@@ -144,6 +170,11 @@ export function ARSessionPage() {
   const [tattooAppearance, setTattooAppearance] = useState<TattooAppearance>({
     ...defaultTattooAppearance,
   });
+  const [cadenceSnapshot, setCadenceSnapshot] = useState(
+    initialCadenceSnapshot,
+  );
+  const [renderResolutionMode, setRenderResolutionMode] =
+    useState<RenderResolutionMode>('auto');
   const [diagnosticsSnapshot, setDiagnosticsSnapshot] =
     useState<TrackingMetricsSnapshot>(initialDiagnosticsSnapshot);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
@@ -387,6 +418,24 @@ export function ARSessionPage() {
     );
   }, []);
 
+  const selectRenderResolutionMode = useCallback(
+    (mode: RenderResolutionMode) => {
+      renderResolutionModeRef.current = mode;
+      setRenderResolutionMode(mode);
+      const video = videoRef.current;
+      const renderer = arRendererRef.current;
+      if (!video || !renderer) return;
+      const rect = video.getBoundingClientRect();
+      renderer.resize(
+        rect.width,
+        rect.height,
+        window.devicePixelRatio || 1,
+        renderPixelRatioCap(mode, cadenceRef.current.level),
+      );
+    },
+    [],
+  );
+
   const updateTattooSize = useCallback(
     (longestDimension: number) => {
       const anchor = tattooAnchorRef.current;
@@ -603,11 +652,13 @@ export function ARSessionPage() {
     radiusEstimatorRef.current.reset();
     radiusEstimateRef.current = null;
     feasibilityMonitorRef.current.reset();
+    cadenceRef.current.reset();
     metricsRef.current = new TrackingMetrics();
     telemetryHistoryRef.current.clear();
     telemetryRendererRef.current?.draw([]);
     lastMetricsUiRef.current = 0;
     setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setCadenceSnapshot(cadenceRef.current.snapshot());
     setForearmDiagnostics(initialForearmDiagnostics());
     setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
     setTrackerMessage('Tracker restarting…');
@@ -628,11 +679,13 @@ export function ARSessionPage() {
     radiusEstimatorRef.current.reset();
     radiusEstimateRef.current = null;
     feasibilityMonitorRef.current.reset();
+    cadenceRef.current.reset();
     metricsRef.current = new TrackingMetrics();
     telemetryHistoryRef.current.clear();
     telemetryRendererRef.current?.draw([]);
     lastMetricsUiRef.current = 0;
     setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setCadenceSnapshot(cadenceRef.current.snapshot());
     setForearmDiagnostics(initialForearmDiagnostics());
     setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
     setFacingMode(nextFacingMode);
@@ -719,6 +772,8 @@ export function ARSessionPage() {
       if (!cancelled && !document.hidden) {
         stopFrames = startFrameScheduler(video, tracker, {
           onFrameDropped: () => metricsRef.current.recordDrop(),
+          getTargetFramesPerSecond: () =>
+            cadenceRef.current.targetFramesPerSecond,
         });
       }
     };
@@ -756,6 +811,7 @@ export function ARSessionPage() {
         unsubscribe = tracker.subscribe((frame) => {
           canPlaceTattooRef.current = false;
           const nowMs = performance.now();
+          cadenceRef.current.recordInference(frame.inferenceMs);
           const stabilized = stabilizerRef.current.process(frame, nowMs);
           if (stabilized.state !== 'tracking') {
             tattooGesture.cancel();
@@ -803,6 +859,10 @@ export function ARSessionPage() {
               rect.width,
               rect.height,
               window.devicePixelRatio || 1,
+              renderPixelRatioCap(
+                renderResolutionModeRef.current,
+                cadenceRef.current.level,
+              ),
             );
             if (forearmFrameRef.current && radiusEstimateRef.current) {
               arRenderer.updateSurface({
@@ -863,6 +923,7 @@ export function ARSessionPage() {
           if (nowMs - lastMetricsUiRef.current >= 1000) {
             lastMetricsUiRef.current = nowMs;
             setDiagnosticsSnapshot(metrics);
+            setCadenceSnapshot(cadenceRef.current.snapshot());
             setForearmDiagnostics({
               rollSource: forearmFrameRef.current?.orientationSource ?? '—',
               rollConfidence: forearmFrameRef.current?.rollConfidence ?? 0,
@@ -956,6 +1017,10 @@ export function ARSessionPage() {
         rect.width,
         rect.height,
         window.devicePixelRatio || 1,
+        renderPixelRatioCap(
+          renderResolutionModeRef.current,
+          cadenceRef.current.level,
+        ),
       );
       arRendererRef.current?.updateViewport(transform, {
         width: video.videoWidth,
@@ -1393,6 +1458,41 @@ export function ARSessionPage() {
             </button>
           </div>
         </div>
+        <fieldset className="performance-panel">
+          <legend>04 / performance</legend>
+          <div className="performance-modes">
+            {renderResolutionModes.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={renderResolutionMode === mode}
+                onClick={() => selectRenderResolutionMode(mode)}
+              >
+                {renderResolutionLabels[mode]}
+              </button>
+            ))}
+          </div>
+          <div className="performance-readout" aria-live="polite">
+            <span>
+              <small>Tracking target</small>
+              <b>{cadenceSnapshot.targetFramesPerSecond} FPS</b>
+            </span>
+            <span>
+              <small>AR detail cap</small>
+              <b>
+                {renderPixelRatioCap(
+                  renderResolutionMode,
+                  cadenceSnapshot.level,
+                )}
+                ×
+              </b>
+            </span>
+          </div>
+          <p>
+            Auto balances detail against measured inference cost. Sharp keeps
+            maximum AR density; Efficient limits it to 1×.
+          </p>
+        </fieldset>
         <div className="controls">
           <button
             className="primary"
