@@ -2,6 +2,8 @@ import { DoubleSide, ShaderMaterial, Vector2, type Texture } from 'three';
 
 export interface TattooAppearance {
   opacity: number;
+  inkBlend: number;
+  edgeFeather: number;
   removeWhiteBackground: boolean;
   backgroundThreshold: number;
   backgroundFeather: number;
@@ -10,6 +12,8 @@ export interface TattooAppearance {
 
 export const defaultTattooAppearance: Readonly<TattooAppearance> = {
   opacity: 0.68,
+  inkBlend: 1,
+  edgeFeather: 0.025,
   removeWhiteBackground: false,
   backgroundThreshold: 0.82,
   backgroundFeather: 0.08,
@@ -23,6 +27,7 @@ export interface TattooMaterialControls {
   setRotation(radians: number): void;
   setCircumferenceRatio(ratio: number): void;
   setTrackingOpacity(opacity: number): void;
+  setBodyMask(texture: Texture | null): void;
   setAppearance(appearance: TattooAppearance): void;
 }
 
@@ -34,41 +39,50 @@ export interface TattooMaterialBundle {
 export function createTattooMaterial(): TattooMaterialBundle {
   const uniforms = {
     tattooMap: { value: null as Texture | null },
+    bodyMask: { value: null as Texture | null },
+    bodyMaskEnabled: { value: 0 },
     anchorUv: { value: new Vector2(0.5, 0.5) },
     patchSize: { value: new Vector2(0.24, 0.32) },
     rotation: { value: 0 },
     circumferenceRatio: { value: 0.7 },
     trackingOpacity: { value: 1 },
     userOpacity: { value: defaultTattooAppearance.opacity },
+    inkBlend: { value: defaultTattooAppearance.inkBlend },
     removeWhiteBackground: { value: 0 },
     backgroundThreshold: {
       value: defaultTattooAppearance.backgroundThreshold,
     },
     backgroundFeather: { value: defaultTattooAppearance.backgroundFeather },
     invertArtwork: { value: 0 },
-    edgeFeather: { value: 0.025 },
+    edgeFeather: { value: defaultTattooAppearance.edgeFeather },
   };
   const material = new ShaderMaterial({
     uniforms,
     vertexShader: `
       attribute float facing;
+      attribute vec2 sourceUv;
       varying vec2 vBodyUv;
+      varying vec2 vSourceUv;
       varying float vFacing;
 
       void main() {
         vBodyUv = uv;
+        vSourceUv = sourceUv;
         vFacing = facing;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: `
       uniform sampler2D tattooMap;
+      uniform sampler2D bodyMask;
+      uniform float bodyMaskEnabled;
       uniform vec2 anchorUv;
       uniform vec2 patchSize;
       uniform float rotation;
       uniform float circumferenceRatio;
       uniform float trackingOpacity;
       uniform float userOpacity;
+      uniform float inkBlend;
       uniform float removeWhiteBackground;
       uniform float backgroundThreshold;
       uniform float backgroundFeather;
@@ -76,6 +90,7 @@ export function createTattooMaterial(): TattooMaterialBundle {
       uniform float edgeFeather;
 
       varying vec2 vBodyUv;
+      varying vec2 vSourceUv;
       varying float vFacing;
 
       void main() {
@@ -122,13 +137,27 @@ export function createTattooMaterial(): TattooMaterialBundle {
         );
         float borderAlpha = smoothstep(0.0, edgeFeather, edgeDistance);
         float facingAlpha = smoothstep(0.02, 0.28, vFacing);
-        float alpha = artworkAlpha * borderAlpha * facingAlpha
+        float bodyAlpha = 1.0;
+        if (bodyMaskEnabled > 0.5) {
+          if (
+            any(lessThan(vSourceUv, vec2(0.0))) ||
+            any(greaterThan(vSourceUv, vec2(1.0)))
+          ) {
+            bodyAlpha = 0.0;
+          } else {
+            float bodyConfidence = texture2D(bodyMask, vSourceUv).r;
+            bodyAlpha = smoothstep(0.35, 0.65, bodyConfidence);
+          }
+        }
+        float alpha = artworkAlpha * borderAlpha * facingAlpha * bodyAlpha
           * trackingOpacity * userOpacity;
         if (alpha < 0.01) discard;
 
-        // A transparent DOM overlay cannot sample the video beneath it. Dark
-        // alpha compositing is the Phase 4 approximation of an ink blend.
-        vec3 ink = min(artworkColor, vec3(0.16));
+        // A transparent DOM overlay cannot sample the video beneath it. The
+        // absorption control blends original color toward the established
+        // dark-ink approximation without changing alpha strength.
+        vec3 absorbedInk = min(artworkColor, vec3(0.16));
+        vec3 ink = mix(artworkColor, absorbedInk, inkBlend);
         gl_FragColor = vec4(ink, alpha);
       }
     `,
@@ -163,15 +192,21 @@ export function createTattooMaterial(): TattooMaterialBundle {
       setTrackingOpacity(value) {
         uniforms.trackingOpacity.value = clampUnit(value);
       },
+      setBodyMask(texture) {
+        uniforms.bodyMask.value = texture;
+        uniforms.bodyMaskEnabled.value = texture ? 1 : 0;
+      },
       setAppearance(appearance) {
         const normalized = normalizeTattooAppearance(appearance);
         uniforms.userOpacity.value = normalized.opacity;
+        uniforms.inkBlend.value = normalized.inkBlend;
         uniforms.removeWhiteBackground.value = normalized.removeWhiteBackground
           ? 1
           : 0;
         uniforms.backgroundThreshold.value = normalized.backgroundThreshold;
         uniforms.backgroundFeather.value = normalized.backgroundFeather;
         uniforms.invertArtwork.value = normalized.invert ? 1 : 0;
+        uniforms.edgeFeather.value = normalized.edgeFeather;
       },
     },
   };
@@ -182,6 +217,8 @@ export function normalizeTattooAppearance(
 ): TattooAppearance {
   return {
     opacity: clampUnit(appearance.opacity),
+    inkBlend: clampUnit(appearance.inkBlend),
+    edgeFeather: Math.min(0.2, Math.max(0.001, appearance.edgeFeather)),
     removeWhiteBackground: appearance.removeWhiteBackground,
     backgroundThreshold: clampUnit(appearance.backgroundThreshold),
     backgroundFeather: Math.min(

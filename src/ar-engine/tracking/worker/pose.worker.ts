@@ -42,7 +42,10 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           request.timestampMs,
         );
         frame.inferenceMs = performance.now() - started;
-        post({ type: 'pose', frame });
+        const transfer = frame.bodyMask
+          ? [frame.bodyMask.data.buffer as ArrayBuffer]
+          : [];
+        post({ type: 'pose', frame }, transfer);
       });
     } finally {
       request.bitmap.close();
@@ -56,6 +59,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   }
 };
 
-function post(message: WorkerResponse): void {
-  self.postMessage(message);
+function post(message: WorkerResponse, transfer: Transferable[] = []): void {
+  const workerScope = self as unknown as {
+    postMessage(value: WorkerResponse, transfer: Transferable[]): void;
+  };
+  workerScope.postMessage(message, transfer);
 }

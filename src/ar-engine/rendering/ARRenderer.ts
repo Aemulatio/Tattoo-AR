@@ -17,6 +17,7 @@ import { ForearmSurfaceRaycaster } from '../surfaces/forearm/ForearmSurfaceRayca
 import type { TattooAsset } from '../tattoo/TattooAssetLoader';
 import { TattooPatch } from '../tattoo/TattooPatch';
 import type { TattooAppearance } from '../tattoo/tattoo-shader';
+import { bodyMaskForSide } from './BodyMaskPolicy';
 import { ForearmProjector, forearmProjectionCamera } from './ForearmProjector';
 import { ProjectedForearmGeometry } from './ProjectedForearmGeometry';
 
@@ -111,6 +112,7 @@ export class ARRenderer {
     this.projectedSurface.update(this.sourceGeometry, projector);
     this.surfaceRaycaster.setRegion(`${input.side}Forearm`);
     this.tattooPatch.updateSurface(input.side, input.localFrame, input.radii);
+    this.tattooPatch.setBodyMask(bodyMaskForSide(input.poseFrame, input.side));
     this.tattooPatch.setOpacity(input.opacity);
   }
 
@@ -122,6 +124,7 @@ export class ARRenderer {
   clearSurface(): void {
     this.latestSurface = null;
     this.projectedSurface.clear();
+    this.tattooPatch.setBodyMask(null);
     this.tattooPatch.clearSurface();
   }
 

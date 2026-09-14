@@ -1221,6 +1221,46 @@ export function ARSessionPage() {
                 }
               />
             </label>
+            <label className="range-control">
+              <span>
+                Ink absorption
+                <output>{Math.round(tattooAppearance.inkBlend * 100)}%</output>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={Math.round(tattooAppearance.inkBlend * 100)}
+                onChange={(event) =>
+                  setTattooAppearance((current) => ({
+                    ...current,
+                    inkBlend: Number(event.target.value) / 100,
+                  }))
+                }
+              />
+            </label>
+            <label className="range-control">
+              <span>
+                Tattoo edge fade
+                <output>
+                  {Math.round(tattooAppearance.edgeFeather * 100)}%
+                </output>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                step="1"
+                value={Math.round(tattooAppearance.edgeFeather * 100)}
+                onChange={(event) =>
+                  setTattooAppearance((current) => ({
+                    ...current,
+                    edgeFeather: Number(event.target.value) / 100,
+                  }))
+                }
+              />
+            </label>
           </div>
         </section>
         <fieldset className="arm-selector">

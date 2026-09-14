@@ -1,5 +1,14 @@
-import { Mesh, type BufferGeometry, type ShaderMaterial } from 'three';
-import type { BodySide, TattooAnchor } from '../contracts';
+import {
+  ClampToEdgeWrapping,
+  DataTexture,
+  LinearFilter,
+  Mesh,
+  RedFormat,
+  UnsignedByteType,
+  type BufferGeometry,
+  type ShaderMaterial,
+} from 'three';
+import type { BodyMask, BodySide, TattooAnchor } from '../contracts';
 import type { ForearmLocalFrame } from '../surfaces/forearm/ForearmFrameEstimator';
 import type { ForearmRadii } from '../surfaces/forearm/ForearmGeometry';
 import type { TattooAsset } from './TattooAssetLoader';
@@ -18,6 +27,8 @@ export class TattooPatch {
   private surfaceReady = false;
   private userVisible = true;
   private circumferenceRatio = 0.7;
+  private bodyMaskTexture: DataTexture | null = null;
+  private bodyMaskPixels: Uint8Array | null = null;
 
   constructor(geometry: BufferGeometry) {
     const bundle = createTattooMaterial();
@@ -87,12 +98,48 @@ export class TattooPatch {
     this.controls.setAppearance(appearance);
   }
 
+  setBodyMask(mask: BodyMask | null): void {
+    if (!mask) {
+      this.controls.setBodyMask(null);
+      return;
+    }
+    if (
+      !this.bodyMaskTexture ||
+      this.bodyMaskTexture.image.width !== mask.width ||
+      this.bodyMaskTexture.image.height !== mask.height
+    ) {
+      this.bodyMaskTexture?.dispose();
+      this.bodyMaskPixels = new Uint8Array(mask.data);
+      this.bodyMaskTexture = new DataTexture(
+        this.bodyMaskPixels,
+        mask.width,
+        mask.height,
+        RedFormat,
+        UnsignedByteType,
+      );
+      this.bodyMaskTexture.minFilter = LinearFilter;
+      this.bodyMaskTexture.magFilter = LinearFilter;
+      this.bodyMaskTexture.wrapS = ClampToEdgeWrapping;
+      this.bodyMaskTexture.wrapT = ClampToEdgeWrapping;
+      this.bodyMaskTexture.generateMipmaps = false;
+      this.bodyMaskTexture.flipY = false;
+      this.bodyMaskTexture.unpackAlignment = 1;
+    } else {
+      this.bodyMaskPixels?.set(mask.data);
+    }
+    this.bodyMaskTexture.needsUpdate = true;
+    this.controls.setBodyMask(this.bodyMaskTexture);
+  }
+
   setVisible(visible: boolean): void {
     this.userVisible = visible;
     this.updateVisibility();
   }
 
   dispose(): void {
+    this.bodyMaskTexture?.dispose();
+    this.bodyMaskTexture = null;
+    this.bodyMaskPixels = null;
     this.mesh.material.dispose();
   }
 
