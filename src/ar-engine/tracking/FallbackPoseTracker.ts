@@ -125,7 +125,18 @@ function asError(error: unknown): Error {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'type' in error &&
+    typeof error.type === 'string'
+  ) {
+    return error.type === 'error'
+      ? 'Browser resource load failed'
+      : `Browser ${error.type} event`;
+  }
+  return String(error);
 }
 
 async function disposeQuietly(tracker: PoseTracker): Promise<void> {

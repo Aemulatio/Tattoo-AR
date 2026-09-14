@@ -5,6 +5,7 @@ import type { ForearmRadii } from '../surfaces/forearm/ForearmGeometry';
 import type { TattooAsset } from './TattooAssetLoader';
 import {
   createTattooMaterial,
+  type TattooAppearance,
   type TattooMaterialControls,
 } from './tattoo-shader';
 
@@ -15,6 +16,7 @@ export class TattooPatch {
   private asset: TattooAsset | null = null;
   private surfaceSide: BodySide | null = null;
   private surfaceReady = false;
+  private userVisible = true;
   private circumferenceRatio = 0.7;
 
   constructor(geometry: BufferGeometry) {
@@ -78,7 +80,16 @@ export class TattooPatch {
   }
 
   setOpacity(opacity: number): void {
-    this.controls.setOpacity(Math.min(1, Math.max(0, opacity)));
+    this.controls.setTrackingOpacity(opacity);
+  }
+
+  setAppearance(appearance: TattooAppearance): void {
+    this.controls.setAppearance(appearance);
+  }
+
+  setVisible(visible: boolean): void {
+    this.userVisible = visible;
+    this.updateVisibility();
   }
 
   dispose(): void {
@@ -88,6 +99,7 @@ export class TattooPatch {
   private updateVisibility(): void {
     this.mesh.visible = Boolean(
       this.surfaceReady &&
+      this.userVisible &&
       this.asset &&
       this.anchor &&
       this.surfaceSide &&

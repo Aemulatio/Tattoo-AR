@@ -5,7 +5,11 @@ import {
   InvalidTattooAnchorError,
   isTattooAnchor,
   parseTattooAnchor,
+  resetTattooAnchorTransform,
+  resizeTattooAnchor,
+  rotateTattooAnchor,
   serializeTattooAnchor,
+  tattooSizeForAspectRatio,
 } from './TattooAnchor';
 
 const input = {
@@ -104,6 +108,41 @@ describe('TattooAnchor', () => {
     expect(result.anchor.width).toBeCloseTo(Math.SQRT1_2);
     expect(result.anchor.height).toBeCloseTo(Math.SQRT1_2);
     expect(isTattooAnchor(result.anchor)).toBe(true);
+  });
+
+  it('creates proportional default sizes for portrait and landscape artwork', () => {
+    expect(tattooSizeForAspectRatio(0.5)).toEqual({
+      width: 0.15,
+      height: 0.3,
+    });
+    expect(tattooSizeForAspectRatio(2)).toEqual({
+      width: 0.3,
+      height: 0.15,
+    });
+  });
+
+  it('resizes proportionally and clamps the longest dimension', () => {
+    const anchor = createTattooAnchor(input);
+    const resized = resizeTattooAnchor(anchor, 2).anchor;
+
+    expect(Math.max(resized.width, resized.height)).toBeCloseTo(0.8);
+    expect(resized.width / resized.height).toBeCloseTo(
+      anchor.width / anchor.height,
+    );
+  });
+
+  it('applies rotation and reset through the surface constraint', () => {
+    const anchor = createTattooAnchor({
+      ...input,
+      width: 0.4,
+      height: 0.2,
+      rotation: Math.PI / 4,
+    });
+    const rotated = rotateTattooAnchor(anchor, Math.PI * 2.5).anchor;
+    const reset = resetTattooAnchorTransform(rotated, 2).anchor;
+
+    expect(rotated.rotation).toBeCloseTo(Math.PI / 2);
+    expect(reset).toMatchObject({ width: 0.3, height: 0.15, rotation: 0 });
   });
 
   it.each([

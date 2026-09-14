@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { ViewportTransform } from '../ar-engine/camera/ViewportTransform';
@@ -34,20 +35,44 @@ import {
   ForearmRadiusEstimator,
   type ForearmRadiusEstimate,
 } from '../ar-engine/surfaces/forearm/ForearmRadiusEstimator';
-import { createTattooAnchor } from '../ar-engine/tattoo/TattooAnchor';
+import {
+  createTattooAnchor,
+  resetTattooAnchorTransform,
+  resizeTattooAnchor,
+  rotateTattooAnchor,
+  tattooSizeForAspectRatio,
+  type TattooAnchorConstraintResult,
+} from '../ar-engine/tattoo/TattooAnchor';
 import {
   TattooAssetLoader,
   TattooAssetLoadSupersededError,
   type TattooAsset,
 } from '../ar-engine/tattoo/TattooAssetLoader';
 import {
+  decodeTattooFile,
+  TattooFileError,
+  type DecodedTattooFile,
+} from '../ar-engine/tattoo/TattooFileDecoder';
+import {
+  defaultTattooAppearance,
+  type TattooAppearance,
+} from '../ar-engine/tattoo/tattoo-shader';
+import {
   TattooGestureController,
   type TattooGestureKind,
   type TattooGestureUpdate,
 } from '../ar-engine/tattoo/TattooGestureController';
+import { createSessionFailure, type SessionFailure } from './session-errors';
 import { getCapabilityReport, type SessionState } from './session-state';
 
 type FacingMode = 'user' | 'environment';
+type ArtworkStatus = 'loading' | 'ready' | 'error';
+
+interface ArtworkState {
+  status: ArtworkStatus;
+  name: string;
+  detail: string;
+}
 
 const initialError =
   'Camera access is requested only after you choose Start camera.';
@@ -67,8 +92,10 @@ export function ARSessionPage() {
   const poseCanvasRef = useRef<HTMLCanvasElement>(null);
   const tattooCanvasRef = useRef<HTMLCanvasElement>(null);
   const telemetryCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sessionErrorPanelRef = useRef<HTMLElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraRequestRef = useRef(0);
+  const restartInFlightRef = useRef(false);
   const trackerRef = useRef<FallbackPoseTracker | null>(null);
   const stabilizerRef = useRef(new PoseStabilizer({ selectedSide: 'left' }));
   const forearmEstimatorRef = useRef(new ForearmFrameEstimator());
@@ -80,6 +107,11 @@ export function ARSessionPage() {
   const viewportTransformRef = useRef<ViewportTransform | null>(null);
   const tattooAnchorRef = useRef<TattooAnchor | null>(null);
   const tattooAssetRef = useRef<TattooAsset | null>(null);
+  const tattooLoaderRef = useRef<TattooAssetLoader | null>(null);
+  const tattooAppearanceRef = useRef<TattooAppearance>({
+    ...defaultTattooAppearance,
+  });
+  const tattooVisibleRef = useRef(true);
   const tattooGestureRef = useRef<TattooGestureController | null>(null);
   const canPlaceTattooRef = useRef(false);
   const bodySideRef = useRef<BodySide>('left');
@@ -89,15 +121,29 @@ export function ARSessionPage() {
   const telemetryRendererRef = useRef<TelemetryGraphRenderer | null>(null);
   const lastMetricsUiRef = useRef(0);
   const [session, setSession] = useState<SessionState>('idle');
+  const [sessionFailure, setSessionFailure] = useState<SessionFailure | null>(
+    null,
+  );
+  const [isRestarting, setIsRestarting] = useState(false);
   const [facingMode, setFacingMode] = useState<FacingMode>('environment');
   const [bodySide, setBodySide] = useState<BodySide>('left');
   const [isMirrored, setIsMirrored] = useState(false);
   const [message, setMessage] = useState(initialError);
   const [trackerMessage, setTrackerMessage] = useState('Tracker idle');
   const [tattooMessage, setTattooMessage] = useState(
-    'Start the camera, then tap the tracked forearm to place the fixture.',
+    'Preparing the demo artwork. You can upload your own design now.',
   );
   const [tattooAnchor, setTattooAnchor] = useState<TattooAnchor | null>(null);
+  const [hasTattooAsset, setHasTattooAsset] = useState(false);
+  const [tattooVisible, setTattooVisible] = useState(true);
+  const [artwork, setArtwork] = useState<ArtworkState>({
+    status: 'loading',
+    name: 'Demo artwork',
+    detail: 'Preparing the built-in transparent PNG…',
+  });
+  const [tattooAppearance, setTattooAppearance] = useState<TattooAppearance>({
+    ...defaultTattooAppearance,
+  });
   const [diagnosticsSnapshot, setDiagnosticsSnapshot] =
     useState<TrackingMetricsSnapshot>(initialDiagnosticsSnapshot);
   const [dimensions, setDimensions] = useState({ source: '—', display: '—' });
@@ -127,13 +173,11 @@ export function ARSessionPage() {
       createAnchor: (hit) => {
         const asset = tattooAssetRef.current;
         if (!asset) return null;
-        const height = 0.3;
         return createTattooAnchor({
           region: hit.region,
           u: hit.uv.x,
           v: hit.uv.y,
-          width: Math.min(0.3, height * asset.aspectRatio),
-          height,
+          ...tattooSizeForAspectRatio(asset.aspectRatio),
           rotation: 0,
         });
       },
@@ -162,8 +206,67 @@ export function ARSessionPage() {
   }, []);
 
   useEffect(() => {
+    const loader = new TattooAssetLoader();
+    tattooLoaderRef.current = loader;
+    let active = true;
+    void loader
+      .replace(
+        `${import.meta.env.BASE_URL}test-fixtures/botanical-crescent.png`,
+      )
+      .then((asset) => {
+        if (!active) return;
+        tattooAssetRef.current = asset;
+        arRendererRef.current?.setTattoo(asset);
+        setHasTattooAsset(true);
+        setArtwork({
+          status: 'ready',
+          name: 'Botanical crescent',
+          detail: `${asset.pixelWidth} × ${asset.pixelHeight} px · demo transparent PNG`,
+        });
+        setTattooMessage(
+          'Artwork ready. Start the camera, then tap the tracked forearm.',
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active || error instanceof TattooAssetLoadSupersededError) return;
+        const detail = error instanceof Error ? error.message : 'unknown error';
+        setArtwork({
+          status: 'error',
+          name: 'Demo unavailable',
+          detail: `Could not load the demo artwork (${detail}). Upload a PNG or JPEG instead.`,
+        });
+      });
+    return () => {
+      active = false;
+      if (tattooLoaderRef.current === loader) tattooLoaderRef.current = null;
+      if (tattooAssetRef.current === loader.current) {
+        tattooAssetRef.current = null;
+      }
+      loader.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
     isMirroredRef.current = isMirrored;
   }, [isMirrored]);
+
+  useEffect(() => {
+    tattooAppearanceRef.current = tattooAppearance;
+    arRendererRef.current?.setTattooAppearance(tattooAppearance);
+  }, [tattooAppearance]);
+
+  useEffect(() => {
+    tattooVisibleRef.current = tattooVisible;
+    arRendererRef.current?.setTattooVisible(tattooVisible);
+  }, [tattooVisible]);
+
+  useEffect(() => {
+    if (!sessionFailure) return;
+    const animationFrame = requestAnimationFrame(() => {
+      sessionErrorPanelRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(animationFrame);
+  }, [sessionFailure]);
 
   const handleTattooPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -254,6 +357,158 @@ export function ARSessionPage() {
     setTattooMessage('Placement cleared. Tap the forearm to place it again.');
   }, []);
 
+  const commitControlledAnchor = useCallback(
+    (result: TattooAnchorConstraintResult, message: string) => {
+      tattooGestureRef.current?.reset();
+      clearTattooGestureFeedback(tattooCanvasRef.current);
+      tattooAnchorRef.current = result.anchor;
+      arRendererRef.current?.setAnchor(result.anchor);
+      setTattooAnchor(result.anchor);
+      const seamCrossed =
+        arRendererRef.current?.crossesTattooSeam(result.anchor) ?? false;
+      const note = result.boundaryClamped
+        ? ' Kept inside the forearm boundary.'
+        : seamCrossed
+          ? ' The design wraps across the forearm seam.'
+          : '';
+      setTattooMessage(`${message}${note}`);
+    },
+    [],
+  );
+
+  const setTattooVisibility = useCallback((visible: boolean) => {
+    tattooVisibleRef.current = visible;
+    arRendererRef.current?.setTattooVisible(visible);
+    setTattooVisible(visible);
+    setTattooMessage(
+      visible
+        ? 'Tattoo shown. Placement and adjustments were preserved.'
+        : 'Tattoo hidden. Placement and adjustments are still preserved.',
+    );
+  }, []);
+
+  const updateTattooSize = useCallback(
+    (longestDimension: number) => {
+      const anchor = tattooAnchorRef.current;
+      if (!anchor) return;
+      commitControlledAnchor(
+        resizeTattooAnchor(anchor, longestDimension),
+        `Tattoo size set to ${Math.round(longestDimension * 100)}% of forearm length.`,
+      );
+    },
+    [commitControlledAnchor],
+  );
+
+  const updateTattooRotation = useCallback(
+    (rotationDegrees: number) => {
+      const anchor = tattooAnchorRef.current;
+      if (!anchor) return;
+      commitControlledAnchor(
+        rotateTattooAnchor(anchor, (rotationDegrees * Math.PI) / 180),
+        `Tattoo rotation set to ${signedDegrees(rotationDegrees)}.`,
+      );
+    },
+    [commitControlledAnchor],
+  );
+
+  const resetTattooAdjustments = useCallback(() => {
+    const asset = tattooAssetRef.current;
+    const resetAppearance: TattooAppearance = {
+      ...defaultTattooAppearance,
+      removeWhiteBackground:
+        asset?.sourceUrl.startsWith('local-file:') ?? false,
+    };
+    tattooAppearanceRef.current = resetAppearance;
+    arRendererRef.current?.setTattooAppearance(resetAppearance);
+    setTattooAppearance(resetAppearance);
+    tattooVisibleRef.current = true;
+    arRendererRef.current?.setTattooVisible(true);
+    setTattooVisible(true);
+
+    const anchor = tattooAnchorRef.current;
+    if (anchor && asset) {
+      commitControlledAnchor(
+        resetTattooAnchorTransform(anchor, asset.aspectRatio),
+        'Size, rotation, ink strength, and visibility reset.',
+      );
+    } else {
+      setTattooMessage(
+        'Artwork adjustments reset. Tap the tracked forearm to place it.',
+      );
+    }
+  }, [commitControlledAnchor]);
+
+  const handleTattooFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.currentTarget.files?.[0];
+      event.currentTarget.value = '';
+      if (!file) return;
+      const loader = tattooLoaderRef.current;
+      if (!loader) {
+        setArtwork({
+          status: 'error',
+          name: file.name,
+          detail:
+            'The artwork loader is not ready. Try choosing the file again.',
+        });
+        return;
+      }
+
+      setArtwork({
+        status: 'loading',
+        name: file.name,
+        detail: `Checking and preparing ${formatFileSize(file.size)} on this device…`,
+      });
+      let decoded: DecodedTattooFile | null = null;
+      try {
+        const asset = await loader.replaceWith(
+          `local-file:${encodeURIComponent(file.name)}`,
+          async () => {
+            decoded = await decodeTattooFile(file);
+            return decoded.resource;
+          },
+        );
+        if (!decoded) throw new Error('Image decoding did not return metadata');
+
+        tattooGestureRef.current?.reset();
+        clearTattooGestureFeedback(tattooCanvasRef.current);
+        tattooAnchorRef.current = null;
+        tattooAssetRef.current = asset;
+        arRendererRef.current?.setTattoo(asset);
+        arRendererRef.current?.setAnchor(null);
+        tattooVisibleRef.current = true;
+        arRendererRef.current?.setTattooVisible(true);
+        setTattooAnchor(null);
+        setHasTattooAsset(true);
+        setTattooVisible(true);
+        setTattooAppearance((current) => ({
+          ...current,
+          removeWhiteBackground: true,
+          invert: false,
+        }));
+        setArtwork({
+          status: 'ready',
+          name: file.name,
+          detail: artworkDimensionsMessage(decoded, file.size),
+        });
+        setTattooMessage(
+          'Your artwork is ready. Hold one forearm in frame, then tap it to place.',
+        );
+      } catch (error) {
+        if (error instanceof TattooAssetLoadSupersededError) return;
+        setArtwork({
+          status: 'error',
+          name: file.name,
+          detail:
+            error instanceof TattooFileError
+              ? error.message
+              : 'Could not prepare this image. Try another PNG or JPEG.',
+        });
+      }
+    },
+    [],
+  );
+
   const stopCamera = useCallback(() => {
     tattooGestureRef.current?.reset();
     clearTattooGestureFeedback(tattooCanvasRef.current);
@@ -265,13 +520,17 @@ export function ARSessionPage() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
+  const failSession = useCallback((failure: SessionFailure) => {
+    setSessionFailure(failure);
+    setMessage(failure.guidance);
+    setSession('error');
+  }, []);
+
   const startCamera = useCallback(
     async (requestedFacingMode = facingMode) => {
+      setSessionFailure(null);
       if (!navigator.mediaDevices?.getUserMedia) {
-        setMessage(
-          'This browser does not provide camera access. Try a current mobile browser over HTTPS.',
-        );
-        setSession('error');
+        failSession(createSessionFailure('compatibility'));
         return;
       }
 
@@ -304,6 +563,7 @@ export function ARSessionPage() {
         video.srcObject = stream;
         await video.play();
         if (request !== cameraRequestRef.current) return;
+        setSessionFailure(null);
         setSession('previewing');
         setMessage('Camera ready. Loading pose tracker…');
       } catch (error) {
@@ -315,16 +575,50 @@ export function ARSessionPage() {
           }
         }
         if (request !== cameraRequestRef.current) return;
-        const detail =
-          error instanceof DOMException ? error.name : 'Unknown error';
-        setMessage(
-          `Could not start the camera (${detail}). Check permission, then try again.`,
-        );
-        setSession('error');
+        failSession(createSessionFailure('camera', error));
       }
     },
-    [facingMode, stopCamera],
+    [facingMode, failSession, stopCamera],
   );
+
+  const restartSession = useCallback(async () => {
+    if (restartInFlightRef.current) return;
+    restartInFlightRef.current = true;
+    setIsRestarting(true);
+    setSessionFailure(null);
+    setSession('requestingCamera');
+    setMessage('Rebuilding the camera and on-device tracker…');
+    stopCamera();
+
+    const tracker = trackerRef.current;
+    trackerRef.current = null;
+    try {
+      await tracker?.dispose();
+    } catch {
+      // A failed tracker is replaced below even when its cleanup reports an error.
+    }
+    stabilizerRef.current.reset();
+    forearmEstimatorRef.current.reset();
+    forearmFrameRef.current = null;
+    radiusEstimatorRef.current.reset();
+    radiusEstimateRef.current = null;
+    feasibilityMonitorRef.current.reset();
+    metricsRef.current = new TrackingMetrics();
+    telemetryHistoryRef.current.clear();
+    telemetryRendererRef.current?.draw([]);
+    lastMetricsUiRef.current = 0;
+    setDiagnosticsSnapshot(metricsRef.current.snapshot());
+    setForearmDiagnostics(initialForearmDiagnostics());
+    setFeasibilitySnapshot(emptyForearmFeasibilitySnapshot());
+    setTrackerMessage('Tracker restarting…');
+
+    try {
+      await startCamera(facingMode);
+    } finally {
+      restartInFlightRef.current = false;
+      setIsRestarting(false);
+    }
+  }, [facingMode, startCamera, stopCamera]);
 
   const switchCamera = useCallback(() => {
     const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
@@ -405,36 +699,21 @@ export function ARSessionPage() {
       const detail = error instanceof Error ? error.message : 'unknown error';
       queueMicrotask(() => {
         setTrackerMessage(`Renderer failed: ${detail}`);
-        setMessage(`Could not start WebGL rendering (${detail}).`);
-        setSession('error');
+        failSession(createSessionFailure('renderer', error));
       });
       forearmGeometry.dispose();
       return;
     }
-    const tattooLoader = new TattooAssetLoader();
     let stopFrames: () => void = () => {};
     let unsubscribe: () => void = () => {};
     let cancelled = false;
     let initialized = false;
     arRendererRef.current = arRenderer;
+    arRenderer.setTattoo(tattooAssetRef.current);
+    arRenderer.setTattooAppearance(tattooAppearanceRef.current);
+    arRenderer.setTattooVisible(tattooVisibleRef.current);
     arRenderer.setAnchor(tattooAnchorRef.current);
     if (!document.hidden) arRenderer.start();
-    void tattooLoader
-      .replace(
-        `${import.meta.env.BASE_URL}test-fixtures/botanical-crescent.png`,
-      )
-      .then((asset) => {
-        if (cancelled) return;
-        tattooAssetRef.current = asset;
-        arRenderer.setTattoo(asset);
-        setTattooMessage('Fixture ready. Tap the tracked forearm to place it.');
-      })
-      .catch((error: unknown) => {
-        if (cancelled || error instanceof TattooAssetLoadSupersededError)
-          return;
-        const detail = error instanceof Error ? error.message : 'unknown error';
-        setTattooMessage(`Could not load tattoo fixture (${detail}).`);
-      });
     const startScheduling = () => {
       stopFrames();
       if (!cancelled && !document.hidden) {
@@ -623,10 +902,9 @@ export function ARSessionPage() {
         arRenderer.clearSurface();
         if (trackerRef.current === tracker) trackerRef.current = null;
         void tracker.dispose();
-        const detail = error instanceof Error ? error.message : 'unknown error';
-        setTrackerMessage(`Tracker failed: ${detail}`);
-        setMessage(`Could not load pose tracking (${detail}). Try again.`);
-        setSession('error');
+        const failure = createSessionFailure('tracker', error);
+        setTrackerMessage(failure.title);
+        failSession(failure);
       });
     return () => {
       cancelled = true;
@@ -635,16 +913,14 @@ export function ARSessionPage() {
       tattooGesture.reset();
       clearTattooGestureFeedback(tattooCanvas);
       poseRenderer.clear();
-      tattooLoader.dispose();
       arRenderer.dispose();
       canPlaceTattooRef.current = false;
       if (arRendererRef.current === arRenderer) arRendererRef.current = null;
-      tattooAssetRef.current = null;
       viewportTransformRef.current = null;
       forearmGeometry.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [debug, session]);
+  }, [debug, failSession, session]);
 
   useEffect(
     () => () => {
@@ -778,20 +1054,177 @@ export function ARSessionPage() {
           <span>{trackerMessage}</span>
         </div>
         {session !== 'previewing' && (
-          <div className="stage-message">{message}</div>
+          <div className="stage-message" role="status" aria-live="polite">
+            {message}
+          </div>
         )}
       </section>
 
       <section className="control-panel" aria-label="Camera controls">
-        <p className="eyebrow">Phase 4 · body-local ink lab</p>
-        <h1>Ink, held in place.</h1>
+        <p className="eyebrow">Phase 5 · bring your own ink</p>
+        <h1>Your sketch, on skin.</h1>
         <p className="lede">
-          Tap the visible forearm to pin the fixture. Drag to move it; pinch and
-          twist to scale and rotate. Every edit stays in body coordinates—not
-          screen pixels.
+          Choose a PNG or JPEG, then hold one forearm fully in frame. Tap to
+          place; drag to move; pinch and twist to resize and rotate.
         </p>
+        {sessionFailure && (
+          <section
+            ref={sessionErrorPanelRef}
+            className="session-error-panel"
+            role="alert"
+            tabIndex={-1}
+            aria-labelledby="session-error-title"
+            aria-describedby="session-error-guidance"
+          >
+            <div className="session-error-heading">
+              <span>Session issue</span>
+              <b>{sessionFailure.category}</b>
+            </div>
+            <h2 id="session-error-title">{sessionFailure.title}</h2>
+            <p id="session-error-guidance">{sessionFailure.guidance}</p>
+            {sessionFailure.technicalDetail && (
+              <code>{sessionFailure.technicalDetail}</code>
+            )}
+            <button
+              type="button"
+              onClick={() => void restartSession()}
+              disabled={isRestarting}
+            >
+              {isRestarting ? 'Restarting…' : sessionFailure.retryLabel}
+            </button>
+            <small>
+              Artwork, placement, and appearance settings stay saved.
+            </small>
+          </section>
+        )}
+        <section
+          className={`artwork-panel is-${artwork.status}`}
+          aria-labelledby="artwork-heading"
+          aria-busy={artwork.status === 'loading'}
+        >
+          <div className="artwork-heading">
+            <span>01 / artwork</span>
+            <strong id="artwork-heading">Load your design</strong>
+          </div>
+          <label className="file-picker">
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={(event) => void handleTattooFileChange(event)}
+            />
+            <span>
+              {artwork.status === 'loading'
+                ? 'Preparing image…'
+                : 'Choose PNG or JPEG'}
+            </span>
+            <small>On-device only · 20 MB max · scaled to 2048 px</small>
+          </label>
+          <p
+            className="artwork-status"
+            role={artwork.status === 'error' ? 'alert' : 'status'}
+          >
+            <strong>{artwork.name}</strong>
+            {artwork.detail}
+          </p>
+          <div className="appearance-controls">
+            <label className="switch-control">
+              <input
+                type="checkbox"
+                checked={tattooAppearance.removeWhiteBackground}
+                onChange={(event) =>
+                  setTattooAppearance((current) => ({
+                    ...current,
+                    removeWhiteBackground: event.target.checked,
+                  }))
+                }
+              />
+              <span>
+                <b>Remove white paper</b>
+                <small>Turns pale background pixels transparent</small>
+              </span>
+            </label>
+            <label className="range-control">
+              <span>
+                Paper cutoff
+                <output>
+                  {Math.round(tattooAppearance.backgroundThreshold * 100)}%
+                </output>
+              </span>
+              <input
+                type="range"
+                min="40"
+                max="98"
+                step="1"
+                value={Math.round(tattooAppearance.backgroundThreshold * 100)}
+                disabled={!tattooAppearance.removeWhiteBackground}
+                onChange={(event) =>
+                  setTattooAppearance((current) => ({
+                    ...current,
+                    backgroundThreshold: Number(event.target.value) / 100,
+                  }))
+                }
+              />
+            </label>
+            <label className="range-control">
+              <span>
+                Edge softness
+                <output>
+                  {Math.round(tattooAppearance.backgroundFeather * 100)}%
+                </output>
+              </span>
+              <input
+                type="range"
+                min="1"
+                max="30"
+                step="1"
+                value={Math.round(tattooAppearance.backgroundFeather * 100)}
+                disabled={!tattooAppearance.removeWhiteBackground}
+                onChange={(event) =>
+                  setTattooAppearance((current) => ({
+                    ...current,
+                    backgroundFeather: Number(event.target.value) / 100,
+                  }))
+                }
+              />
+            </label>
+            <label className="switch-control is-compact">
+              <input
+                type="checkbox"
+                checked={tattooAppearance.invert}
+                onChange={(event) =>
+                  setTattooAppearance((current) => ({
+                    ...current,
+                    invert: event.target.checked,
+                  }))
+                }
+              />
+              <span>
+                <b>Invert paper and ink</b>
+              </span>
+            </label>
+            <label className="range-control ink-strength">
+              <span>
+                Ink strength
+                <output>{Math.round(tattooAppearance.opacity * 100)}%</output>
+              </span>
+              <input
+                type="range"
+                min="15"
+                max="100"
+                step="1"
+                value={Math.round(tattooAppearance.opacity * 100)}
+                onChange={(event) =>
+                  setTattooAppearance((current) => ({
+                    ...current,
+                    opacity: Number(event.target.value) / 100,
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </section>
         <fieldset className="arm-selector">
-          <legend>Target forearm</legend>
+          <legend>02 / target forearm</legend>
           {(['left', 'right'] as const).map((side) => (
             <button
               key={side}
@@ -804,8 +1237,32 @@ export function ARSessionPage() {
             </button>
           ))}
         </fieldset>
+        <aside className="framing-guide" aria-label="Forearm framing guide">
+          <span>Framing check</span>
+          <ol>
+            <li>
+              <b>Show both joints</b>
+              <small>Keep wrist and elbow visible with the full forearm.</small>
+            </li>
+            <li>
+              <b>Face the skin forward</b>
+              <small>
+                Start with the broad side of the forearm toward camera.
+              </small>
+            </li>
+            <li>
+              <b>Hold, then place</b>
+              <small>Wait for stable tracking before tapping the skin.</small>
+            </li>
+          </ol>
+        </aside>
         <div className="placement-panel" aria-live="polite">
-          <span>Tattoo fixture</span>
+          <div className="placement-heading">
+            <span>03 / placement</span>
+            <b data-visible={tattooVisible}>
+              {tattooVisible ? 'visible' : 'hidden'}
+            </b>
+          </div>
           <p>{tattooMessage}</p>
           {tattooAnchor && (
             <code>
@@ -815,18 +1272,107 @@ export function ARSessionPage() {
               {signedDegrees((tattooAnchor.rotation * 180) / Math.PI)}
             </code>
           )}
-          <button type="button" onClick={clearTattoo} disabled={!tattooAnchor}>
-            Clear placement
-          </button>
+          <div className="placement-controls">
+            <label className="range-control">
+              <span>
+                Size
+                <output>
+                  {Math.round(
+                    Math.max(
+                      tattooAnchor?.width ?? 0.3,
+                      tattooAnchor?.height ?? 0.3,
+                    ) * 100,
+                  )}
+                  %
+                </output>
+              </span>
+              <input
+                type="range"
+                min="5"
+                max="80"
+                step="1"
+                value={Math.round(
+                  Math.max(
+                    tattooAnchor?.width ?? 0.3,
+                    tattooAnchor?.height ?? 0.3,
+                  ) * 100,
+                )}
+                disabled={!tattooAnchor}
+                onChange={(event) =>
+                  updateTattooSize(Number(event.target.value) / 100)
+                }
+              />
+            </label>
+            <label className="range-control">
+              <span>
+                Rotation
+                <output>
+                  {signedDegrees(
+                    ((tattooAnchor?.rotation ?? 0) * 180) / Math.PI,
+                  )}
+                </output>
+              </span>
+              <input
+                type="range"
+                min="-180"
+                max="179"
+                step="1"
+                value={Math.round(
+                  ((tattooAnchor?.rotation ?? 0) * 180) / Math.PI,
+                )}
+                disabled={!tattooAnchor}
+                onChange={(event) =>
+                  updateTattooRotation(Number(event.target.value))
+                }
+              />
+            </label>
+          </div>
+          <div className="placement-actions">
+            <button
+              type="button"
+              aria-pressed={!tattooVisible}
+              onClick={() => setTattooVisibility(!tattooVisible)}
+              disabled={!hasTattooAsset}
+            >
+              {tattooVisible ? 'Hide tattoo' : 'Show tattoo'}
+            </button>
+            <button
+              type="button"
+              onClick={resetTattooAdjustments}
+              disabled={!hasTattooAsset}
+            >
+              Reset edits
+            </button>
+            <button
+              className="clear-placement"
+              type="button"
+              onClick={clearTattoo}
+              disabled={!tattooAnchor}
+            >
+              Clear placement
+            </button>
+          </div>
         </div>
         <div className="controls">
           <button
             className="primary"
             type="button"
-            onClick={() => void startCamera()}
-            disabled={session === 'requestingCamera'}
+            onClick={() =>
+              session === 'previewing' || session === 'error'
+                ? void restartSession()
+                : void startCamera()
+            }
+            disabled={session === 'requestingCamera' || isRestarting}
           >
-            {session === 'requestingCamera' ? 'Connecting…' : 'Start camera'}
+            {isRestarting
+              ? 'Restarting…'
+              : session === 'requestingCamera'
+                ? 'Connecting…'
+                : session === 'previewing'
+                  ? 'Restart session'
+                  : session === 'error'
+                    ? (sessionFailure?.retryLabel ?? 'Retry session')
+                    : 'Start camera'}
           </button>
           <button className="secondary" type="button" onClick={switchCamera}>
             Use {facingMode === 'user' ? 'rear' : 'selfie'} camera
@@ -839,15 +1385,6 @@ export function ARSessionPage() {
             {isMirrored ? 'Unmirror preview' : 'Mirror preview'}
           </button>
         </div>
-        {session === 'error' && (
-          <button
-            className="retry"
-            type="button"
-            onClick={() => void startCamera()}
-          >
-            Try again
-          </button>
-        )}
         {debug && (
           <details className="diagnostics" open>
             <summary>Development diagnostics</summary>
@@ -1022,4 +1559,21 @@ function tattooGestureMessage(update: TattooGestureUpdate): string {
 function signedDegrees(value: number): string {
   const rounded = Math.round(value);
   return `${rounded > 0 ? '+' : ''}${rounded}°`;
+}
+
+function artworkDimensionsMessage(
+  decoded: DecodedTattooFile,
+  fileSize: number,
+): string {
+  const source = `${decoded.sourceWidth} × ${decoded.sourceHeight} px`;
+  const prepared = `${decoded.textureWidth} × ${decoded.textureHeight} px`;
+  const dimensions = decoded.wasDownscaled
+    ? `${source} → ${prepared}`
+    : prepared;
+  return `${dimensions} · ${formatFileSize(fileSize)} · kept on this device`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
