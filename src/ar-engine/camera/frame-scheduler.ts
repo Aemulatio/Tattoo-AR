@@ -13,21 +13,21 @@ export function startFrameScheduler(
 ): () => void {
   let active = true;
   const timestamps = new MonotonicTimestamp();
+  const cadenceGate = new FrameCadenceGate();
   let busy = false;
-  let lastTimestamp = 0;
 
   const submitNewestFrame = async (timestampMs: number) => {
     if (!active || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
       return;
-    const minimumIntervalMs = frameIntervalMs(
+    const shouldSubmit = cadenceGate.shouldSubmit(
+      timestampMs,
       options.getTargetFramesPerSecond?.(),
     );
-    if (busy || timestampMs - lastTimestamp < minimumIntervalMs) {
+    if (busy || !shouldSubmit) {
       options.onFrameDropped?.();
       return;
     }
     busy = true;
-    lastTimestamp = timestampMs;
     try {
       tracker.submit(await createImageBitmap(video), timestampMs);
     } catch {
@@ -62,4 +62,30 @@ export function frameIntervalMs(targetFramesPerSecond = 20): number {
     ? targetFramesPerSecond
     : 20;
   return 1000 / Math.min(60, Math.max(1, finiteTarget));
+}
+
+export class FrameCadenceGate {
+  private previousTimestampMs: number | null = null;
+  private availableTimeMs = 0;
+
+  shouldSubmit(timestampMs: number, targetFramesPerSecond = 20): boolean {
+    if (!Number.isFinite(timestampMs)) return false;
+    const intervalMs = frameIntervalMs(targetFramesPerSecond);
+    if (
+      this.previousTimestampMs === null ||
+      timestampMs < this.previousTimestampMs
+    ) {
+      this.previousTimestampMs = timestampMs;
+      this.availableTimeMs = intervalMs;
+    } else {
+      this.availableTimeMs = Math.min(
+        intervalMs * 2,
+        this.availableTimeMs + timestampMs - this.previousTimestampMs,
+      );
+      this.previousTimestampMs = timestampMs;
+    }
+    if (this.availableTimeMs + Number.EPSILON < intervalMs) return false;
+    this.availableTimeMs = Math.max(0, this.availableTimeMs - intervalMs);
+    return true;
+  }
 }

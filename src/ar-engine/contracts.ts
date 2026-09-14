@@ -51,6 +51,8 @@ export interface BodyMask {
   data: Uint8Array;
 }
 
+export type InferenceDelegate = 'CPU' | 'GPU';
+
 export interface PoseFrame {
   frameId: number;
   timestampMs: number;
@@ -63,9 +65,11 @@ export interface PoseFrame {
 export interface TrackerConfig {
   wasmRoot: string;
   modelAssetPath: string;
+  delegatePreference?: InferenceDelegate;
 }
 
 export interface PoseTracker {
+  readonly inferenceDelegate?: InferenceDelegate | null;
   initialize(config: TrackerConfig): Promise<void>;
   submit(frame: ImageBitmap, timestampMs: number): void;
   subscribe(listener: (frame: PoseFrame) => void): () => void;

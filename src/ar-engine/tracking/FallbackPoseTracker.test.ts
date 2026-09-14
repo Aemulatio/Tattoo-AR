@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PoseFrame, PoseTracker, TrackerConfig } from '../contracts';
+import type {
+  InferenceDelegate,
+  PoseFrame,
+  PoseTracker,
+  TrackerConfig,
+} from '../contracts';
 import { FallbackPoseTracker } from './FallbackPoseTracker';
 
 const config: TrackerConfig = {
@@ -7,11 +12,15 @@ const config: TrackerConfig = {
   modelAssetPath: '/models/pose.task',
 };
 
-function fakeTracker(initializeError?: unknown): PoseTracker & {
+function fakeTracker(
+  initializeError?: unknown,
+  inferenceDelegate: InferenceDelegate | null = null,
+): PoseTracker & {
   initialize: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 } {
   return {
+    inferenceDelegate,
     initialize: vi.fn(async () => {
       if (initializeError) throw initializeError;
     }),
@@ -23,7 +32,7 @@ function fakeTracker(initializeError?: unknown): PoseTracker & {
 
 describe('FallbackPoseTracker', () => {
   it('uses the worker tracker when it initializes', async () => {
-    const worker = fakeTracker();
+    const worker = fakeTracker(undefined, 'GPU');
     const createFallback = vi.fn(() => fakeTracker());
     const tracker = new FallbackPoseTracker(() => worker, createFallback);
 
@@ -31,6 +40,7 @@ describe('FallbackPoseTracker', () => {
     await tracker.initialize(config);
 
     expect(tracker.executionMode).toBe('worker');
+    expect(tracker.inferenceDelegate).toBe('GPU');
     expect(worker.initialize).toHaveBeenCalledOnce();
     expect(worker.initialize).toHaveBeenCalledWith(config);
     expect(createFallback).not.toHaveBeenCalled();

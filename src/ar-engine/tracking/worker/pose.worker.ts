@@ -1,4 +1,5 @@
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
+import { initializeWithInferenceDelegate } from '../InferenceDelegate';
 import { poseFrameFromResult } from '../PoseResultMapper';
 import type { WorkerRequest, WorkerResponse } from './messages';
 
@@ -13,16 +14,24 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         request.config.wasmRoot,
         true,
       );
-      detector = await PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: request.config.modelAssetPath },
-        runningMode: 'VIDEO',
-        numPoses: 1,
-        minPoseDetectionConfidence: 0.55,
-        minPosePresenceConfidence: 0.55,
-        minTrackingConfidence: 0.5,
-        outputSegmentationMasks: true,
-      });
-      post({ type: 'ready' });
+      const selection = await initializeWithInferenceDelegate(
+        request.config.delegatePreference ?? 'GPU',
+        (delegate) =>
+          PoseLandmarker.createFromOptions(fileset, {
+            baseOptions: {
+              modelAssetPath: request.config.modelAssetPath,
+              delegate,
+            },
+            runningMode: 'VIDEO',
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.55,
+            minPosePresenceConfidence: 0.55,
+            minTrackingConfidence: 0.5,
+            outputSegmentationMasks: true,
+          }),
+      );
+      detector = selection.instance;
+      post({ type: 'ready', delegate: selection.delegate });
       return;
     }
     if (request.type === 'dispose') {
@@ -36,16 +45,20 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     const started = performance.now();
     try {
       detector.detectForVideo(request.bitmap, request.timestampMs, (result) => {
-        const frame = poseFrameFromResult(
-          result,
-          ++frameId,
-          request.timestampMs,
-        );
-        frame.inferenceMs = performance.now() - started;
-        const transfer = frame.bodyMask
-          ? [frame.bodyMask.data.buffer as ArrayBuffer]
-          : [];
-        post({ type: 'pose', frame }, transfer);
+        try {
+          const frame = poseFrameFromResult(
+            result,
+            ++frameId,
+            request.timestampMs,
+          );
+          frame.inferenceMs = performance.now() - started;
+          const transfer = frame.bodyMask
+            ? [frame.bodyMask.data.buffer as ArrayBuffer]
+            : [];
+          post({ type: 'pose', frame }, transfer);
+        } finally {
+          result.close();
+        }
       });
     } finally {
       request.bitmap.close();
