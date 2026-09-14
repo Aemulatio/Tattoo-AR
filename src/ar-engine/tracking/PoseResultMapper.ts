@@ -1,6 +1,12 @@
 import type { PoseLandmarkerResult } from '@mediapipe/tasks-vision';
-import type { ForearmMaskSample, PoseFrame, PosePoint } from '../contracts';
+import type {
+  BodyMask,
+  ForearmMaskSample,
+  PoseFrame,
+  PosePoint,
+} from '../contracts';
 import { sampleForearmMask } from '../surfaces/forearm/ForearmMaskSampler';
+import { createCompactBodyMask } from './BodyMask';
 
 export function poseFrameFromResult(
   result: PoseLandmarkerResult,
@@ -18,21 +24,29 @@ export function poseFrameFromResult(
     },
     visibility: point.visibility ?? 0,
   }));
-  const forearmMaskSamples = readForearmMask(result, landmarks);
+  const mask = readPoseMask(result, landmarks);
 
   return {
     frameId,
     timestampMs,
     landmarks,
     inferenceMs: 0,
-    ...(forearmMaskSamples ? { forearmMaskSamples } : {}),
+    ...(mask?.forearmMaskSamples
+      ? { forearmMaskSamples: mask.forearmMaskSamples }
+      : {}),
+    ...(mask?.bodyMask ? { bodyMask: mask.bodyMask } : {}),
   };
 }
 
-function readForearmMask(
+interface PoseMaskData {
+  forearmMaskSamples: Partial<Record<'left' | 'right', ForearmMaskSample>>;
+  bodyMask: BodyMask | null;
+}
+
+function readPoseMask(
   result: PoseLandmarkerResult,
   landmarks: ReadonlyArray<PosePoint>,
-): Partial<Record<'left' | 'right', ForearmMaskSample>> | null {
+): PoseMaskData | null {
   const mask = result.segmentationMasks?.[0];
   if (!mask) return null;
 
@@ -54,8 +68,11 @@ function readForearmMask(
     );
     if (!left && !right) return null;
     return {
-      ...(left ? { left } : {}),
-      ...(right ? { right } : {}),
+      forearmMaskSamples: {
+        ...(left ? { left } : {}),
+        ...(right ? { right } : {}),
+      },
+      bodyMask: createCompactBodyMask(pixels, mask.width, mask.height),
     };
   } catch {
     // Landmarks remain usable when a browser cannot expose mask pixels.

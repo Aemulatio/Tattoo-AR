@@ -1,4 +1,9 @@
-import type { PoseFrame, PoseTracker, TrackerConfig } from '../contracts';
+import type {
+  InferenceDelegate,
+  PoseFrame,
+  PoseTracker,
+  TrackerConfig,
+} from '../contracts';
 
 export type PoseTrackerExecutionMode = 'worker' | 'main-thread';
 
@@ -28,6 +33,10 @@ export class FallbackPoseTracker implements PoseTracker {
 
   get fallbackReason(): unknown {
     return this.workerFailure;
+  }
+
+  get inferenceDelegate(): InferenceDelegate | null {
+    return this.activeTracker?.inferenceDelegate ?? null;
   }
 
   initialize(config: TrackerConfig): Promise<void> {

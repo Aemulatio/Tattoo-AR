@@ -31,14 +31,18 @@ describe('ProjectedForearmGeometry', () => {
     const projected = new ProjectedForearmGeometry(source);
     const position = projected.geometry.getAttribute('position');
     const facing = projected.geometry.getAttribute('facing');
+    const sourceUv = projected.geometry.getAttribute('sourceUv');
 
     projected.update(source, projector(false));
     const firstX = position.getX(0);
+    const firstSourceX = sourceUv.getX(0);
     projected.update(source, projector(true));
 
     expect(projected.geometry.getAttribute('position')).toBe(position);
     expect(projected.geometry.getAttribute('facing')).toBe(facing);
+    expect(projected.geometry.getAttribute('sourceUv')).toBe(sourceUv);
     expect(position.getX(0)).toBeCloseTo(-firstX);
+    expect(sourceUv.getX(0)).toBeCloseTo(firstSourceX);
     expect(projected.ready).toBe(true);
   });
 });

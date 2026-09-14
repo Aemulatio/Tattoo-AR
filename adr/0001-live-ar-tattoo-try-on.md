@@ -3,7 +3,7 @@
 - **Status:** Accepted — implementation in progress
 - **Date:** 2026-08-30
 - **Last updated:** 2026-09-14
-- **Implementation:** Phase 4 complete; Phase 5 in progress
+- **Implementation:** Phase 6 complete; Phase 7 not started
 - **Scope:** Greenfield proof of concept and MVP
 - **First supported region:** One forearm at a time
 - **Primary reader:** Codex and project contributors
@@ -423,15 +423,16 @@ Keep math utilities next to the domain that owns them. Do not create a generic `
 
 ## 13. Implementation plan and status
 
-| Phase                            | State       | Current evidence                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 0 — capability shell       | Complete    | Camera flow, mirroring, viewport transform, diagnostics, and tooling merged in PR #1                                                                                                                                                                                                                                                                                                    |
-| Phase 1 — pose tracking          | Complete    | Worker/fallback tracking, backpressure, overlay, cleanup, and memory acceptance merged in PR #3                                                                                                                                                                                                                                                                                         |
-| Phase 2 — smoothing and recovery | Complete    | One Euro smoothing, confidence hysteresis, loss recovery, and telemetry merged in PR #5                                                                                                                                                                                                                                                                                                 |
-| Phase 3 — forearm surface        | Complete    | Side selection, stable local frame, continuous roll/confidence, reusable 12×24 tapered mesh, UVs, wireframe, seam, callback-local mask radius sampling, temporal radius stabilization, anatomical fallback, and measurable flip/radius telemetry implemented; desktop and iPhone 16 Pro Max checks passed; Android explicitly deferred from MVP scope                                   |
-| Phase 4 — tattoo anchoring       | Complete    | Body-local anchor validation, disposable fixture textures, shared forearm projection, front-facing UV raycast, independent WebGL rendering, curved ink shader, tap/drag placement, proportional pinch scaling, tangent-plane rotation, seam wrapping, and boundary feedback implemented; automated checks plus desktop and iOS Safari placement/gesture checks passed                   |
-| Phase 5 — upload and placement   | In progress | Upload, safe decoding/downscaling and texture lifecycle, white-paper and appearance processing, body-local placement controls, framing guidance, categorized accessible camera/rendering/tracking errors, and explicit tracker/camera restart with artwork preservation implemented; upload, appearance, and placement controls passed manual checks; final recovery acceptance pending |
-| Phases 6–7                       | Not started | Phase 5 remains gated; Phases 6–7 will begin only after its remaining controls and manual acceptance checks pass                                                                                                                                                                                                                                                                        |
+| Phase                             | State       | Current evidence                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 0 — capability shell        | Complete    | Camera flow, mirroring, viewport transform, diagnostics, and tooling merged in PR #1                                                                                                                                                                                                                                                                                  |
+| Phase 1 — pose tracking           | Complete    | Worker/fallback tracking, backpressure, overlay, cleanup, and memory acceptance merged in PR #3                                                                                                                                                                                                                                                                       |
+| Phase 2 — smoothing and recovery  | Complete    | One Euro smoothing, confidence hysteresis, loss recovery, and telemetry merged in PR #5                                                                                                                                                                                                                                                                               |
+| Phase 3 — forearm surface         | Complete    | Side selection, stable local frame, continuous roll/confidence, reusable 12×24 tapered mesh, UVs, wireframe, seam, callback-local mask radius sampling, temporal radius stabilization, anatomical fallback, and measurable flip/radius telemetry implemented; desktop and iPhone 16 Pro Max checks passed; Android explicitly deferred from MVP scope                 |
+| Phase 4 — tattoo anchoring        | Complete    | Body-local anchor validation, disposable fixture textures, shared forearm projection, front-facing UV raycast, independent WebGL rendering, curved ink shader, tap/drag placement, proportional pinch scaling, tangent-plane rotation, seam wrapping, and boundary feedback implemented; automated checks plus desktop and iOS Safari placement/gesture checks passed |
+| Phase 5 — upload and placement    | Complete    | Upload, safe decoding/downscaling and texture lifecycle, white-paper processing, body-local placement controls, framing guidance, categorized accessible errors, and explicit restart with artwork preservation implemented; automated checks and manual upload, placement, restart, and recovery checks passed                                                       |
+| Phase 6 — realism and performance | Complete    | Ink realism, body-mask clipping, adaptive cadence, resolution profiles, live budgets, and production diagnostics lockout implemented; GPU inference passes the desktop tracking budget with CPU fallback retained; desktop and iPhone manual review plus a ten-minute main-page heap recording accepted                                                               |
+| Phase 7 — MVP hardening           | Not started | Begins only after Phase 6 performance targets and manual visual review pass                                                                                                                                                                                                                                                                                           |
 
 Update this table when a phase is merged or a feasibility gate changes scope.
 
@@ -575,6 +576,25 @@ Acceptance targets, measured rather than assumed:
 - visual latency and jitter pass a recorded manual review using the test motions below.
 
 Targets may be adjusted after baseline measurement, but the change must be documented with the measured device and reason.
+
+Measurement procedure:
+
+1. Run `npm run dev:https` and open `?debug=1` on the selected minimum device.
+2. Keep the camera and visible forearm active until the live budget has 30 valid one-second samples; record the device, browser, resolution mode, tracking median, and render median.
+3. Exercise placement controls while tracking to review interaction responsiveness, then retain the same session for ten minutes and confirm that memory does not grow without bound.
+4. Verify a production build ignores `?debug=1`; development telemetry must not be available outside a development build.
+
+Baseline recorded 2026-09-14:
+
+| Device                              | Backend      | Mode                | Inference median | Tracking median | Render median                        | Memory                  | Result                                  |
+| ----------------------------------- | ------------ | ------------------- | ---------------- | --------------- | ------------------------------------ | ----------------------- | --------------------------------------- |
+| iPhone 16 Pro Max, browser unlogged | Unlogged     | Auto, 15 FPS target | Not recorded     | 15 FPS          | 60 FPS                               | Not available           | Rate and manual interaction checks pass |
+| Desktop PC, browser/specs unlogged  | Worker / CPU | Auto, 15 FPS target | 108 ms           | 8.8–8.9 FPS     | 59–60 FPS                            | About 50→60 MB over 10m | CPU inference misses tracking budget    |
+| Desktop PC, browser/specs unlogged  | Worker / GPU | Auto, 20 FPS target | 17 ms            | 20 FPS          | Main-page allocation timeline stable | Accepted                |
+
+The GPU-enabled desktop build completed a 596.6-second Chrome heap-allocation recording. Of 20.52 MB of final-live allocations created during the recording, 18.29 MB occurred in the first minute; only 2.23 MB remained from the following nine minutes, with no linear retention pattern or newly retained per-frame `JSArrayBufferData`. This is accepted as evidence against sustained main-page JavaScript heap growth. The recording does not separately profile Worker WASM, browser-native, or GPU memory; that residual limitation is documented and accepted for the MVP.
+
+The desktop CPU result reported a 108 ms inference median, explaining the observed 8.8–8.9 results/s capacity. GPU-first inference reduced the median to 17 ms and reached 20 results/s while preserving the Full model and worker execution. Automatic CPU fallback remains for devices that cannot initialize the GPU delegate; the Lite model is unnecessary unless another target device still misses the budget.
 
 ### Phase 7 — MVP hardening
 

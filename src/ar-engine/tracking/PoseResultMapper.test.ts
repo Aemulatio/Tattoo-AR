@@ -4,7 +4,7 @@ import { PoseLandmark } from './landmark-indices';
 import { poseFrameFromResult } from './PoseResultMapper';
 
 describe('poseFrameFromResult', () => {
-  it('reduces a callback-owned mask to scalar forearm samples', () => {
+  it('reduces a callback-owned mask to forearm samples and compact bytes', () => {
     const pixels = taperedVerticalMask();
     const getAsFloat32Array = vi.fn(() => pixels);
     const result = poseFrameFromResult(
@@ -20,6 +20,9 @@ describe('poseFrameFromResult', () => {
       0.07,
     );
     expect(result.forearmMaskSamples?.right).toBeUndefined();
+    expect(result.bodyMask).toMatchObject({ width: 101, height: 101 });
+    expect(result.bodyMask?.data).toBeInstanceOf(Uint8Array);
+    expect(result.bodyMask?.data).toHaveLength(101 * 101);
   });
 
   it('keeps landmarks usable when mask pixels are unavailable', () => {
@@ -37,6 +40,7 @@ describe('poseFrameFromResult', () => {
 
     expect(result.landmarks).toHaveLength(23);
     expect(result.forearmMaskSamples).toBeUndefined();
+    expect(result.bodyMask).toBeUndefined();
   });
 });
 

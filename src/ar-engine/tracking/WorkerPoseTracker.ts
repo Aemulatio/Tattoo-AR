@@ -1,4 +1,9 @@
-import type { PoseFrame, PoseTracker, TrackerConfig } from '../contracts';
+import type {
+  InferenceDelegate,
+  PoseFrame,
+  PoseTracker,
+  TrackerConfig,
+} from '../contracts';
 import type { WorkerRequest, WorkerResponse } from './worker/messages';
 import { LatestFrameQueue } from './LatestFrameQueue';
 import { StaleResultGate } from './StaleResultGate';
@@ -15,9 +20,14 @@ export class WorkerPoseTracker implements PoseTracker {
   private ready: Promise<void> | null = null;
   private cancelInitialization: ((reason: Error) => void) | null = null;
   private readonly resultGate = new StaleResultGate();
+  private selectedDelegate: InferenceDelegate | null = null;
 
   constructor() {
     this.worker.addEventListener('message', this.onMessage);
+  }
+
+  get inferenceDelegate(): InferenceDelegate | null {
+    return this.selectedDelegate;
   }
 
   initialize(config: TrackerConfig): Promise<void> {
@@ -36,6 +46,7 @@ export class WorkerPoseTracker implements PoseTracker {
       this.cancelInitialization = fail;
       const onReady = (event: MessageEvent<WorkerResponse>) => {
         if (event.data.type === 'ready') {
+          this.selectedDelegate = event.data.delegate;
           cleanup();
           resolve();
         }
@@ -88,6 +99,7 @@ export class WorkerPoseTracker implements PoseTracker {
     this.pending.clear();
     this.worker.removeEventListener('message', this.onMessage);
     this.worker.terminate();
+    this.selectedDelegate = null;
     this.listeners.clear();
   }
 

@@ -63,6 +63,29 @@ describe('TattooPatch', () => {
     expect(materialDispose).toHaveBeenCalledOnce();
   });
 
+  it('reuses and disposes its internally managed body-mask texture', () => {
+    const patch = new TattooPatch(new BufferGeometry());
+    const uniforms = patch.mesh.material.uniforms;
+
+    patch.setBodyMask(bodyMask(2, 2, [0, 255, 255, 0]));
+    const firstTexture = uniforms.bodyMask.value;
+    const firstDispose = vi.spyOn(firstTexture, 'dispose');
+
+    patch.setBodyMask(bodyMask(2, 2, [255, 0, 0, 255]));
+    expect(uniforms.bodyMask.value).toBe(firstTexture);
+    expect(firstTexture.image.data).toEqual(new Uint8Array([255, 0, 0, 255]));
+
+    patch.setBodyMask(bodyMask(3, 1, [0, 255, 0]));
+    expect(firstDispose).toHaveBeenCalledOnce();
+    const replacementTexture = uniforms.bodyMask.value;
+    const replacementDispose = vi.spyOn(replacementTexture, 'dispose');
+
+    patch.setBodyMask(null);
+    expect(uniforms.bodyMaskEnabled.value).toBe(0);
+    patch.dispose();
+    expect(replacementDispose).toHaveBeenCalledOnce();
+  });
+
   it('reports when the rotated physical patch crosses the UV seam', () => {
     const patch = new TattooPatch(new BufferGeometry());
     patch.updateSurface('left', frame, radii());
@@ -99,4 +122,8 @@ function radii() {
     wrist: { radial: 0.2, tangent: 0.16 },
     elbow: { radial: 0.3, tangent: 0.24 },
   };
+}
+
+function bodyMask(width: number, height: number, data: number[]) {
+  return { width, height, data: new Uint8Array(data) };
 }

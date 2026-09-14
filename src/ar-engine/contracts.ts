@@ -44,20 +44,32 @@ export interface ForearmMaskSample {
   confidence: number;
 }
 
+export interface BodyMask {
+  width: number;
+  height: number;
+  /** Row-major, top-left-origin confidence values normalized to 0–255. */
+  data: Uint8Array;
+}
+
+export type InferenceDelegate = 'CPU' | 'GPU';
+
 export interface PoseFrame {
   frameId: number;
   timestampMs: number;
   landmarks: ReadonlyArray<PosePoint>;
   inferenceMs: number;
   forearmMaskSamples?: Partial<Record<BodySide, ForearmMaskSample>>;
+  bodyMask?: BodyMask;
 }
 
 export interface TrackerConfig {
   wasmRoot: string;
   modelAssetPath: string;
+  delegatePreference?: InferenceDelegate;
 }
 
 export interface PoseTracker {
+  readonly inferenceDelegate?: InferenceDelegate | null;
   initialize(config: TrackerConfig): Promise<void>;
   submit(frame: ImageBitmap, timestampMs: number): void;
   subscribe(listener: (frame: PoseFrame) => void): () => void;
