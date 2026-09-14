@@ -12,6 +12,13 @@ export interface ForearmRadii {
   elbow: EllipseRadii;
 }
 
+export interface ForearmSurfaceSample {
+  position: Vec3;
+  normal: Vec3;
+  longitudinalTangent: Vec3;
+  circumferentialTangent: Vec3;
+}
+
 export interface ForearmGeometryOptions {
   longitudinalSegments?: number;
   radialSegments?: number;
@@ -184,11 +191,11 @@ export class ForearmGeometry {
         const a = longitudinalIndex * ringSize + radialIndex;
         const b = a + ringSize;
         indices[offset] = a;
-        indices[offset + 1] = b;
-        indices[offset + 2] = a + 1;
+        indices[offset + 1] = a + 1;
+        indices[offset + 2] = b;
         indices[offset + 3] = b;
-        indices[offset + 4] = b + 1;
-        indices[offset + 5] = a + 1;
+        indices[offset + 4] = a + 1;
+        indices[offset + 5] = b + 1;
         offset += 6;
       }
     }
@@ -209,6 +216,83 @@ export function anatomicalFallbackRadii(forearmLength: number): ForearmRadii {
       radial: forearmLength * 0.15,
       tangent: forearmLength * 0.12,
     },
+  };
+}
+
+export function sampleForearmSurface(
+  frame: ForearmLocalFrame,
+  radii: ForearmRadii,
+  u: number,
+  v: number,
+  seamAngleRadians = Math.PI,
+): ForearmSurfaceSample {
+  if (!Number.isFinite(u) || !Number.isFinite(v)) {
+    throw new RangeError('forearm surface coordinates must be finite');
+  }
+  if (!Number.isFinite(frame.length) || frame.length <= 0) {
+    throw new RangeError(
+      'forearm frame length must be a positive finite number',
+    );
+  }
+  assertRadii(radii);
+
+  const angle = seamAngleRadians + v * Math.PI * 2;
+  const radialFactor = Math.cos(angle);
+  const tangentFactor = Math.sin(angle);
+  const radialRadius = lerp(radii.wrist.radial, radii.elbow.radial, u);
+  const tangentRadius = lerp(radii.wrist.tangent, radii.elbow.tangent, u);
+  const radialSlope = radii.elbow.radial - radii.wrist.radial;
+  const tangentSlope = radii.elbow.tangent - radii.wrist.tangent;
+  const center = addScaled(frame.origin, frame.axis, frame.length * u);
+  const position = add(
+    center,
+    addScaledVector(
+      scale(frame.radial, radialRadius * radialFactor),
+      frame.tangent,
+      tangentRadius * tangentFactor,
+    ),
+  );
+  const normal = normalizeVector(
+    add(
+      addScaledVector(
+        scale(frame.radial, radialFactor / radialRadius),
+        frame.tangent,
+        tangentFactor / tangentRadius,
+      ),
+      scale(
+        frame.axis,
+        -(
+          (radialFactor * radialFactor * radialSlope) /
+            (radialRadius * frame.length) +
+          (tangentFactor * tangentFactor * tangentSlope) /
+            (tangentRadius * frame.length)
+        ),
+      ),
+    ),
+  );
+  const longitudinalTangent = normalizeVector(
+    add(
+      scale(frame.axis, frame.length),
+      addScaledVector(
+        scale(frame.radial, radialSlope * radialFactor),
+        frame.tangent,
+        tangentSlope * tangentFactor,
+      ),
+    ),
+  );
+  const circumferentialTangent = normalizeVector(
+    addScaledVector(
+      scale(frame.radial, -radialRadius * tangentFactor),
+      frame.tangent,
+      tangentRadius * radialFactor,
+    ),
+  );
+
+  return {
+    position,
+    normal,
+    longitudinalTangent,
+    circumferentialTangent,
   };
 }
 
@@ -244,6 +328,32 @@ function addScaled(origin: Vec3, direction: Vec3, amount: number): Vec3 {
     y: origin.y + direction.y * amount,
     z: origin.z + direction.z * amount,
   };
+}
+
+function add(left: Vec3, right: Vec3): Vec3 {
+  return {
+    x: left.x + right.x,
+    y: left.y + right.y,
+    z: left.z + right.z,
+  };
+}
+
+function addScaledVector(origin: Vec3, direction: Vec3, amount: number): Vec3 {
+  return addScaled(origin, direction, amount);
+}
+
+function scale(vector: Vec3, amount: number): Vec3 {
+  return {
+    x: vector.x * amount,
+    y: vector.y * amount,
+    z: vector.z * amount,
+  };
+}
+
+function normalizeVector(vector: Vec3): Vec3 {
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+  if (length < 1e-9) throw new RangeError('surface tangent is degenerate');
+  return scale(vector, 1 / length);
 }
 
 function lerp(from: number, to: number, amount: number): number {
