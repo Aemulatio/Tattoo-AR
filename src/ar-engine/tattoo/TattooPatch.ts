@@ -5,6 +5,7 @@ import type { ForearmRadii } from '../surfaces/forearm/ForearmGeometry';
 import type { TattooAsset } from './TattooAssetLoader';
 import {
   createTattooMaterial,
+  type TattooAppearance,
   type TattooMaterialControls,
 } from './tattoo-shader';
 
@@ -78,7 +79,11 @@ export class TattooPatch {
   }
 
   setOpacity(opacity: number): void {
-    this.controls.setOpacity(Math.min(1, Math.max(0, opacity)));
+    this.controls.setTrackingOpacity(opacity);
+  }
+
+  setAppearance(appearance: TattooAppearance): void {
+    this.controls.setAppearance(appearance);
   }
 
   dispose(): void {

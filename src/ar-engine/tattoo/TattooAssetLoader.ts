@@ -47,13 +47,22 @@ export class TattooAssetLoader {
   }
 
   async replace(sourceUrl: string): Promise<TattooAsset> {
+    return this.replaceWith(sourceUrl, () =>
+      this.textureLoader.loadAsync(sourceUrl),
+    );
+  }
+
+  async replaceWith(
+    sourceUrl: string,
+    loadResource: () => Promise<TattooTextureResource>,
+  ): Promise<TattooAsset> {
     if (this.disposed) throw new Error('TattooAssetLoader is disposed');
     if (!sourceUrl) throw new TypeError('sourceUrl must not be empty');
 
     const generation = ++this.generation;
     let resource: TattooTextureResource;
     try {
-      resource = await this.textureLoader.loadAsync(sourceUrl);
+      resource = await loadResource();
     } catch (error) {
       if (this.disposed || generation !== this.generation) {
         throw new TattooAssetLoadSupersededError();

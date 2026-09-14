@@ -108,6 +108,25 @@ describe('TattooAssetLoader', () => {
     expect(loader.current).toBe(active);
   });
 
+  it('replaces from a caller-owned async resource while preserving lifecycle', async () => {
+    const first = textureResource(100, 200);
+    const second = textureResource(300, 450);
+    const loader = new TattooAssetLoader(sequenceLoader(first));
+    await loader.replace('/fixture.png');
+
+    const asset = await loader.replaceWith(
+      'local-file:sketch.jpg',
+      async () => second,
+    );
+
+    expect(asset.sourceUrl).toBe('local-file:sketch.jpg');
+    expect(asset.aspectRatio).toBeCloseTo(2 / 3);
+    expect(first.releaseSource).toHaveBeenCalledOnce();
+    expect(second.releaseSource).not.toHaveBeenCalled();
+    loader.dispose();
+    expect(second.releaseSource).toHaveBeenCalledOnce();
+  });
+
   it('disposes a late texture from a superseded request', async () => {
     const first = decodedTexture(100, 100);
     const second = decodedTexture(200, 200);

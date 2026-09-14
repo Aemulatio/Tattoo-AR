@@ -16,6 +16,7 @@ import type {
 import { ForearmSurfaceRaycaster } from '../surfaces/forearm/ForearmSurfaceRaycaster';
 import type { TattooAsset } from '../tattoo/TattooAssetLoader';
 import { TattooPatch } from '../tattoo/TattooPatch';
+import type { TattooAppearance } from '../tattoo/tattoo-shader';
 import { ForearmProjector, forearmProjectionCamera } from './ForearmProjector';
 import { ProjectedForearmGeometry } from './ProjectedForearmGeometry';
 
@@ -126,6 +127,10 @@ export class ARRenderer {
 
   setTattoo(asset: TattooAsset | null): void {
     this.tattooPatch.setAsset(asset);
+  }
+
+  setTattooAppearance(appearance: TattooAppearance): void {
+    this.tattooPatch.setAppearance(appearance);
   }
 
   setAnchor(anchor: TattooAnchor | null): void {
