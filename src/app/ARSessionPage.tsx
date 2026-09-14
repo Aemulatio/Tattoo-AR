@@ -35,7 +35,14 @@ import {
   ForearmRadiusEstimator,
   type ForearmRadiusEstimate,
 } from '../ar-engine/surfaces/forearm/ForearmRadiusEstimator';
-import { createTattooAnchor } from '../ar-engine/tattoo/TattooAnchor';
+import {
+  createTattooAnchor,
+  resetTattooAnchorTransform,
+  resizeTattooAnchor,
+  rotateTattooAnchor,
+  tattooSizeForAspectRatio,
+  type TattooAnchorConstraintResult,
+} from '../ar-engine/tattoo/TattooAnchor';
 import {
   TattooAssetLoader,
   TattooAssetLoadSupersededError,
@@ -101,6 +108,7 @@ export function ARSessionPage() {
   const tattooAppearanceRef = useRef<TattooAppearance>({
     ...defaultTattooAppearance,
   });
+  const tattooVisibleRef = useRef(true);
   const tattooGestureRef = useRef<TattooGestureController | null>(null);
   const canPlaceTattooRef = useRef(false);
   const bodySideRef = useRef<BodySide>('left');
@@ -119,6 +127,8 @@ export function ARSessionPage() {
     'Preparing the demo artwork. You can upload your own design now.',
   );
   const [tattooAnchor, setTattooAnchor] = useState<TattooAnchor | null>(null);
+  const [hasTattooAsset, setHasTattooAsset] = useState(false);
+  const [tattooVisible, setTattooVisible] = useState(true);
   const [artwork, setArtwork] = useState<ArtworkState>({
     status: 'loading',
     name: 'Demo artwork',
@@ -156,13 +166,11 @@ export function ARSessionPage() {
       createAnchor: (hit) => {
         const asset = tattooAssetRef.current;
         if (!asset) return null;
-        const height = 0.3;
         return createTattooAnchor({
           region: hit.region,
           u: hit.uv.x,
           v: hit.uv.y,
-          width: Math.min(0.3, height * asset.aspectRatio),
-          height,
+          ...tattooSizeForAspectRatio(asset.aspectRatio),
           rotation: 0,
         });
       },
@@ -202,6 +210,7 @@ export function ARSessionPage() {
         if (!active) return;
         tattooAssetRef.current = asset;
         arRendererRef.current?.setTattoo(asset);
+        setHasTattooAsset(true);
         setArtwork({
           status: 'ready',
           name: 'Botanical crescent',
@@ -238,6 +247,11 @@ export function ARSessionPage() {
     tattooAppearanceRef.current = tattooAppearance;
     arRendererRef.current?.setTattooAppearance(tattooAppearance);
   }, [tattooAppearance]);
+
+  useEffect(() => {
+    tattooVisibleRef.current = tattooVisible;
+    arRendererRef.current?.setTattooVisible(tattooVisible);
+  }, [tattooVisible]);
 
   const handleTattooPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -328,6 +342,87 @@ export function ARSessionPage() {
     setTattooMessage('Placement cleared. Tap the forearm to place it again.');
   }, []);
 
+  const commitControlledAnchor = useCallback(
+    (result: TattooAnchorConstraintResult, message: string) => {
+      tattooGestureRef.current?.reset();
+      clearTattooGestureFeedback(tattooCanvasRef.current);
+      tattooAnchorRef.current = result.anchor;
+      arRendererRef.current?.setAnchor(result.anchor);
+      setTattooAnchor(result.anchor);
+      const seamCrossed =
+        arRendererRef.current?.crossesTattooSeam(result.anchor) ?? false;
+      const note = result.boundaryClamped
+        ? ' Kept inside the forearm boundary.'
+        : seamCrossed
+          ? ' The design wraps across the forearm seam.'
+          : '';
+      setTattooMessage(`${message}${note}`);
+    },
+    [],
+  );
+
+  const setTattooVisibility = useCallback((visible: boolean) => {
+    tattooVisibleRef.current = visible;
+    arRendererRef.current?.setTattooVisible(visible);
+    setTattooVisible(visible);
+    setTattooMessage(
+      visible
+        ? 'Tattoo shown. Placement and adjustments were preserved.'
+        : 'Tattoo hidden. Placement and adjustments are still preserved.',
+    );
+  }, []);
+
+  const updateTattooSize = useCallback(
+    (longestDimension: number) => {
+      const anchor = tattooAnchorRef.current;
+      if (!anchor) return;
+      commitControlledAnchor(
+        resizeTattooAnchor(anchor, longestDimension),
+        `Tattoo size set to ${Math.round(longestDimension * 100)}% of forearm length.`,
+      );
+    },
+    [commitControlledAnchor],
+  );
+
+  const updateTattooRotation = useCallback(
+    (rotationDegrees: number) => {
+      const anchor = tattooAnchorRef.current;
+      if (!anchor) return;
+      commitControlledAnchor(
+        rotateTattooAnchor(anchor, (rotationDegrees * Math.PI) / 180),
+        `Tattoo rotation set to ${signedDegrees(rotationDegrees)}.`,
+      );
+    },
+    [commitControlledAnchor],
+  );
+
+  const resetTattooAdjustments = useCallback(() => {
+    const asset = tattooAssetRef.current;
+    const resetAppearance: TattooAppearance = {
+      ...defaultTattooAppearance,
+      removeWhiteBackground:
+        asset?.sourceUrl.startsWith('local-file:') ?? false,
+    };
+    tattooAppearanceRef.current = resetAppearance;
+    arRendererRef.current?.setTattooAppearance(resetAppearance);
+    setTattooAppearance(resetAppearance);
+    tattooVisibleRef.current = true;
+    arRendererRef.current?.setTattooVisible(true);
+    setTattooVisible(true);
+
+    const anchor = tattooAnchorRef.current;
+    if (anchor && asset) {
+      commitControlledAnchor(
+        resetTattooAnchorTransform(anchor, asset.aspectRatio),
+        'Size, rotation, ink strength, and visibility reset.',
+      );
+    } else {
+      setTattooMessage(
+        'Artwork adjustments reset. Tap the tracked forearm to place it.',
+      );
+    }
+  }, [commitControlledAnchor]);
+
   const handleTattooFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.currentTarget.files?.[0];
@@ -366,7 +461,11 @@ export function ARSessionPage() {
         tattooAssetRef.current = asset;
         arRendererRef.current?.setTattoo(asset);
         arRendererRef.current?.setAnchor(null);
+        tattooVisibleRef.current = true;
+        arRendererRef.current?.setTattooVisible(true);
         setTattooAnchor(null);
+        setHasTattooAsset(true);
+        setTattooVisible(true);
         setTattooAppearance((current) => ({
           ...current,
           removeWhiteBackground: true,
@@ -559,6 +658,7 @@ export function ARSessionPage() {
     arRendererRef.current = arRenderer;
     arRenderer.setTattoo(tattooAssetRef.current);
     arRenderer.setTattooAppearance(tattooAppearanceRef.current);
+    arRenderer.setTattooVisible(tattooVisibleRef.current);
     arRenderer.setAnchor(tattooAnchorRef.current);
     if (!document.hidden) arRenderer.start();
     const startScheduling = () => {
@@ -1053,8 +1153,32 @@ export function ARSessionPage() {
             </button>
           ))}
         </fieldset>
+        <aside className="framing-guide" aria-label="Forearm framing guide">
+          <span>Framing check</span>
+          <ol>
+            <li>
+              <b>Show both joints</b>
+              <small>Keep wrist and elbow visible with the full forearm.</small>
+            </li>
+            <li>
+              <b>Face the skin forward</b>
+              <small>
+                Start with the broad side of the forearm toward camera.
+              </small>
+            </li>
+            <li>
+              <b>Hold, then place</b>
+              <small>Wait for stable tracking before tapping the skin.</small>
+            </li>
+          </ol>
+        </aside>
         <div className="placement-panel" aria-live="polite">
-          <span>03 / placement</span>
+          <div className="placement-heading">
+            <span>03 / placement</span>
+            <b data-visible={tattooVisible}>
+              {tattooVisible ? 'visible' : 'hidden'}
+            </b>
+          </div>
           <p>{tattooMessage}</p>
           {tattooAnchor && (
             <code>
@@ -1064,9 +1188,86 @@ export function ARSessionPage() {
               {signedDegrees((tattooAnchor.rotation * 180) / Math.PI)}
             </code>
           )}
-          <button type="button" onClick={clearTattoo} disabled={!tattooAnchor}>
-            Clear placement
-          </button>
+          <div className="placement-controls">
+            <label className="range-control">
+              <span>
+                Size
+                <output>
+                  {Math.round(
+                    Math.max(
+                      tattooAnchor?.width ?? 0.3,
+                      tattooAnchor?.height ?? 0.3,
+                    ) * 100,
+                  )}
+                  %
+                </output>
+              </span>
+              <input
+                type="range"
+                min="5"
+                max="80"
+                step="1"
+                value={Math.round(
+                  Math.max(
+                    tattooAnchor?.width ?? 0.3,
+                    tattooAnchor?.height ?? 0.3,
+                  ) * 100,
+                )}
+                disabled={!tattooAnchor}
+                onChange={(event) =>
+                  updateTattooSize(Number(event.target.value) / 100)
+                }
+              />
+            </label>
+            <label className="range-control">
+              <span>
+                Rotation
+                <output>
+                  {signedDegrees(
+                    ((tattooAnchor?.rotation ?? 0) * 180) / Math.PI,
+                  )}
+                </output>
+              </span>
+              <input
+                type="range"
+                min="-180"
+                max="179"
+                step="1"
+                value={Math.round(
+                  ((tattooAnchor?.rotation ?? 0) * 180) / Math.PI,
+                )}
+                disabled={!tattooAnchor}
+                onChange={(event) =>
+                  updateTattooRotation(Number(event.target.value))
+                }
+              />
+            </label>
+          </div>
+          <div className="placement-actions">
+            <button
+              type="button"
+              aria-pressed={!tattooVisible}
+              onClick={() => setTattooVisibility(!tattooVisible)}
+              disabled={!hasTattooAsset}
+            >
+              {tattooVisible ? 'Hide tattoo' : 'Show tattoo'}
+            </button>
+            <button
+              type="button"
+              onClick={resetTattooAdjustments}
+              disabled={!hasTattooAsset}
+            >
+              Reset edits
+            </button>
+            <button
+              className="clear-placement"
+              type="button"
+              onClick={clearTattoo}
+              disabled={!tattooAnchor}
+            >
+              Clear placement
+            </button>
+          </div>
         </div>
         <div className="controls">
           <button

@@ -133,6 +133,10 @@ export class ARRenderer {
     this.tattooPatch.setAppearance(appearance);
   }
 
+  setTattooVisible(visible: boolean): void {
+    this.tattooPatch.setVisible(visible);
+  }
+
   setAnchor(anchor: TattooAnchor | null): void {
     this.tattooPatch.setAnchor(anchor);
   }

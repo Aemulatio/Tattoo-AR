@@ -16,6 +16,7 @@ export class TattooPatch {
   private asset: TattooAsset | null = null;
   private surfaceSide: BodySide | null = null;
   private surfaceReady = false;
+  private userVisible = true;
   private circumferenceRatio = 0.7;
 
   constructor(geometry: BufferGeometry) {
@@ -86,6 +87,11 @@ export class TattooPatch {
     this.controls.setAppearance(appearance);
   }
 
+  setVisible(visible: boolean): void {
+    this.userVisible = visible;
+    this.updateVisibility();
+  }
+
   dispose(): void {
     this.mesh.material.dispose();
   }
@@ -93,6 +99,7 @@ export class TattooPatch {
   private updateVisibility(): void {
     this.mesh.visible = Boolean(
       this.surfaceReady &&
+      this.userVisible &&
       this.asset &&
       this.anchor &&
       this.surfaceSide &&

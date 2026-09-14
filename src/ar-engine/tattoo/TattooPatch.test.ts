@@ -44,6 +44,12 @@ describe('TattooPatch', () => {
     patch.updateSurface('left', frame, radii());
     expect(patch.mesh.visible).toBe(true);
 
+    patch.setVisible(false);
+    expect(patch.mesh.visible).toBe(false);
+
+    patch.setVisible(true);
+    expect(patch.mesh.visible).toBe(true);
+
     patch.clearSurface();
     expect(patch.mesh.visible).toBe(false);
   });

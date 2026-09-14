@@ -2,6 +2,8 @@ import type { SurfaceHit, TattooAnchor, Vec2 } from '../contracts';
 import {
   constrainTattooAnchorToSurface,
   createTattooAnchor,
+  maximumTattooLongestDimension,
+  minimumTattooLongestDimension,
   normalizeRotation,
 } from './TattooAnchor';
 
@@ -43,8 +45,6 @@ interface TransformState {
 
 const dragThresholdPixels = 6;
 const transformThresholdPixels = 4;
-const minimumLongestDimension = 0.05;
-const maximumLongestDimension = 0.8;
 
 /** Owns transient pointer state while keeping every result body-local. */
 export class TattooGestureController {
@@ -324,8 +324,8 @@ function shortestWrappedDelta(from: number, to: number): number {
 
 function boundedScale(anchor: TattooAnchor, rawScale: number): number {
   const longestDimension = Math.max(anchor.width, anchor.height);
-  const minimumScale = minimumLongestDimension / longestDimension;
-  const maximumScale = maximumLongestDimension / longestDimension;
+  const minimumScale = minimumTattooLongestDimension / longestDimension;
+  const maximumScale = maximumTattooLongestDimension / longestDimension;
   if (Number.isNaN(rawScale) || rawScale <= 0) return minimumScale;
   if (rawScale === Number.POSITIVE_INFINITY) return maximumScale;
   return Math.min(maximumScale, Math.max(minimumScale, rawScale));

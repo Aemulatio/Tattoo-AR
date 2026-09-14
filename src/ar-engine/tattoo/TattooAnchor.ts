@@ -1,8 +1,16 @@
 import type { BodyRegion, TattooAnchor } from '../contracts';
 
 export const tattooAnchorSchemaVersion = 1 as const;
+export const minimumTattooLongestDimension = 0.05;
+export const maximumTattooLongestDimension = 0.8;
+export const defaultTattooLongestDimension = 0.3;
 
 export type TattooAnchorInput = Omit<TattooAnchor, 'schemaVersion'>;
+
+export interface TattooAnchorConstraintResult {
+  anchor: TattooAnchor;
+  boundaryClamped: boolean;
+}
 
 export class InvalidTattooAnchorError extends TypeError {
   readonly issues: ReadonlyArray<string>;
@@ -72,10 +80,9 @@ export function normalizeRotation(value: number): number {
   return ((((value + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI;
 }
 
-export function constrainTattooAnchorToSurface(anchor: TattooAnchor): {
-  anchor: TattooAnchor;
-  boundaryClamped: boolean;
-} {
+export function constrainTattooAnchorToSurface(
+  anchor: TattooAnchor,
+): TattooAnchorConstraintResult {
   assertTattooAnchor(anchor);
   const axialWidth = Math.abs(Math.sin(anchor.rotation)) * anchor.width;
   const axialHeight = Math.abs(Math.cos(anchor.rotation)) * anchor.height;
@@ -102,6 +109,72 @@ export function constrainTattooAnchorToSurface(anchor: TattooAnchor): {
     boundaryClamped:
       u !== anchor.u || width !== anchor.width || height !== anchor.height,
   };
+}
+
+export function tattooSizeForAspectRatio(
+  aspectRatio: number,
+  longestDimension = defaultTattooLongestDimension,
+): Pick<TattooAnchor, 'width' | 'height'> {
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    throw new RangeError('Tattoo aspect ratio must be positive and finite');
+  }
+  if (!Number.isFinite(longestDimension) || longestDimension <= 0) {
+    throw new RangeError('Tattoo size must be positive and finite');
+  }
+  const longest = Math.min(
+    maximumTattooLongestDimension,
+    Math.max(minimumTattooLongestDimension, longestDimension),
+  );
+  return aspectRatio >= 1
+    ? { width: longest, height: longest / aspectRatio }
+    : { width: longest * aspectRatio, height: longest };
+}
+
+export function resizeTattooAnchor(
+  anchor: TattooAnchor,
+  longestDimension: number,
+): TattooAnchorConstraintResult {
+  assertTattooAnchor(anchor);
+  if (!Number.isFinite(longestDimension) || longestDimension <= 0) {
+    throw new RangeError('Tattoo size must be positive and finite');
+  }
+  const currentLongest = Math.max(anchor.width, anchor.height);
+  const requestedLongest = Math.min(
+    maximumTattooLongestDimension,
+    Math.max(minimumTattooLongestDimension, longestDimension),
+  );
+  const scale = requestedLongest / currentLongest;
+  return constrainTattooAnchorToSurface(
+    createTattooAnchor({
+      ...anchor,
+      width: anchor.width * scale,
+      height: anchor.height * scale,
+    }),
+  );
+}
+
+export function rotateTattooAnchor(
+  anchor: TattooAnchor,
+  rotation: number,
+): TattooAnchorConstraintResult {
+  assertTattooAnchor(anchor);
+  return constrainTattooAnchorToSurface(
+    createTattooAnchor({ ...anchor, rotation }),
+  );
+}
+
+export function resetTattooAnchorTransform(
+  anchor: TattooAnchor,
+  aspectRatio: number,
+): TattooAnchorConstraintResult {
+  assertTattooAnchor(anchor);
+  return constrainTattooAnchorToSurface(
+    createTattooAnchor({
+      ...anchor,
+      ...tattooSizeForAspectRatio(aspectRatio),
+      rotation: 0,
+    }),
+  );
 }
 
 function tattooAnchorIssues(value: unknown): string[] {
